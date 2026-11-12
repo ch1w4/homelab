@@ -4,7 +4,7 @@
 Proxmox VE 9 の3ノードクラスタを中心に、ゲームサーバー（Minecraft）・Webアプリ・基盤サービス（VPN・監視・バックアップ・Git）を動かしています。
 ネットワークは NEC IX2215 と Allied Telesis AT-x210 で VLAN を分け、外部公開は Cloudflare Tunnel と Oracle Cloud の中継サーバー経由にして、自宅のグローバル IP を公開していません。
 
-> 最終更新: 2026-11-09（現在稼働中の構成。計画中のものは「今後の予定」に分けて記載）
+> 最終更新: 2026-11-13（現在稼働中の構成。計画中のものは「今後の予定」に分けて記載）
 
 ---
 
@@ -35,6 +35,7 @@ Proxmox VE 9 の3ノードクラスタを中心に、ゲームサーバー（Min
               ▼               ▼                ▼
         ① pve-mc        ② pve-app        ③ pve-infra
         Minecraft       Web / DB / Git   VPN / 監視 / バックアップ
+              └──── 10GbE 直結（Ceph・フルメッシュ）────┘
 ```
 
 ---
@@ -43,9 +44,12 @@ Proxmox VE 9 の3ノードクラスタを中心に、ゲームサーバー（Min
 
 | ノード | ホスト名 | CPU / メモリ | ストレージ | 役割 |
 |---|---|---|---|---|
-| ① | pve-mc | Core i5-13400 / 64GB | SATA SSD 1TB（ZFS） | Minecraft 専用 |
-| ② | pve-app | Core i7-9700K / 32GB | NVMe 512GB（ZFS）＋ HDD 2TB | Web・アプリ・DB・テスト |
-| ③ | pve-infra | Core i5-8400 / 16GB | SATA SSD 500GB（ZFS）＋ HDD 3TB | VPN・監視・ログ・バックアップ |
+| ① | pve-mc | Core i5-13400 / 64GB | SATA SSD 1TB（ZFS）＋ Ceph 用 SSD 480GB | Minecraft 専用 |
+| ② | pve-app | Core i7-9700K / 32GB | NVMe 512GB（ZFS）＋ HDD 2TB ＋ Ceph 用 SSD 480GB | Web・アプリ・DB・テスト |
+| ③ | pve-infra | Core i5-8400 / 16GB | SATA SSD 500GB（ZFS）＋ HDD 3TB ＋ Ceph 用 SSD 480GB | VPN・監視・ログ・バックアップ |
+
+- 3台とも Mellanox ConnectX-4 Lx（10GbE・2ポート）を挿し、SFP+ DAC 3本で三角形に直結（スイッチなし）
+- Ceph 用 SSD は停電保護（PLP）付きの Intel DC S3520 480GB
 
 | 機器 | 役割 |
 |---|---|
@@ -70,14 +74,17 @@ Proxmox VE 9 の3ノードクラスタを中心に、ゲームサーバー（Min
 | 30 | DMZ | 192.168.30.0/24 | 外部公開するもの（proxy01・mc01） |
 | 50 | 検証 | 192.168.50.0/24 | テスト用 VM・VRRP 検証 |
 | 99 | 管理 | 192.168.99.0/24 | Proxmox・スイッチなどの管理画面 |
+| — | Ceph | 192.168.100.0/24 | 10GbE 直結（スイッチ・ルーターを通らない） |
 
 ---
 
 ## Proxmox クラスタ「chiwa-lab」
 
 - Proxmox VE 9.2、3ノード・3票でクォーラム
-- ストレージは各ノードの ZFS（local-zfs）、バックアップは Proxmox Backup Server（pbs01）
-- **HA**：ノードが止まると別のノードで自動起動（ZFS レプリケーションで②⇔③にディスクを複製）
+- ストレージは各ノードの ZFS（local-zfs）と **Ceph**（共有ストレージ）、バックアップは Proxmox Backup Server（pbs01）
+- **Ceph**：3台で MON・MGR・OSD を1つずつ、プール `ceph-vm`（3重・約440GB）。通信は 10GbE のフルメッシュ（PVE 9 の SDN Fabrics・OpenFabric）で、1本切れても遠回りして通じる。iperf3 で 9.4Gbps
+- **HA**：HA 対象7台のディスクは Ceph 上にあり、ノードが止まると別のノードで「止まった瞬間のデータのまま」自動起動。ライブマイグレーションも数秒
+- HA のノードアフィニティ：Web/DB は②優先→③、基盤は③優先→②、docker01 は②優先→①（③のメモリ不足のため）
 - VMID は「VLAN 番号 ＋ IP の末尾」（例：2040 → 192.168.20.40）
 
 | VMID | 名前 | 種類 | ノード | 内容 | HA |
@@ -85,8 +92,8 @@ Proxmox VE 9 の3ノードクラスタを中心に、ゲームサーバー（Min
 | 3020 | mc01 | VM | ① | Velocity＋Geyser/Floodgate、lobby・survival（Paper） | — |
 | 3010 | proxy01 | VM | ② | Nginx Proxy Manager＋cloudflared | ◯ |
 | 2040 | db01 | LXC | ② | PostgreSQL 17 | ◯ |
-| 2045 | git01 | LXC | ② | Forgejo（自前 Git） | — |
-| 2050 | docker01 | VM | ② | 個人サイト・Web アプリ（Docker Compose） | — |
+| 2045 | git01 | LXC | ② | Forgejo（自前 Git） | ◯ |
+| 2050 | docker01 | VM | ② | 個人サイト・Web アプリ（Docker Compose） | ◯ |
 | 2051 | docker02 | VM | ② | 学校課題の Web アプリ（Docker Compose） | — |
 | 5020 | mctest01 | VM | ② | Minecraft プラグインのテストサーバー（VLAN50） | — |
 | 2015 | vpn01 | LXC | ③ | Tailscale サブネットルーター＋exit node | ◯ |
@@ -94,7 +101,7 @@ Proxmox VE 9 の3ノードクラスタを中心に、ゲームサーバー（Min
 | 2025 | log01 | LXC | ③ | rsyslog（ルーター・スイッチのログを 90 日保存） | — |
 | 2030 | mon01 | LXC | ③ | Uptime Kuma（死活監視 → Discord 通知） | ◯ |
 | 2035 | vault01 | LXC | ③ | Vaultwarden（Tailscale 経由のみ） | ◯ |
-| 2055 | runner01 | VM | ③ | Forgejo Runner（push で自動デプロイ） | — |
+| 2055 | runner01 | VM | ② | Forgejo Runner（push で自動デプロイ） | — |
 
 ---
 
@@ -135,7 +142,8 @@ relay01 は Tailscale の ACL で **mc01 のゲームポート（TCP 25565 / UDP
 - [ ] IX2215 を2台にして全 VLAN を VRRP 化（RTX1200 を置き換え）、回線断の切替（watch-group）
 - [ ] 無線 AP（SSID ごとに VLAN）とゲスト用 VLAN60
 - [ ] Prometheus・Grafana・Alertmanager による監視基盤、Loki・Oxidized
-- [ ] 3ノードを 10GbE で直結（フルメッシュ）し、Ceph で HA 対象を共有ストレージ化
+- [x] 3ノードを 10GbE で直結（フルメッシュ）し、Ceph で HA 対象を共有ストレージ化（2026-11）
+- [ ] ③のメモリを 32GB に増設
 - [ ] UPS と NUT による停電時の自動シャットダウン
 - [ ] Ansible による初期セットアップの自動化
 
@@ -144,6 +152,7 @@ relay01 は Tailscale の ACL で **mc01 のゲームポート（TCP 25565 / UDP
 ## 学んだこと
 
 - Proxmox クラスタ・HA・ZFS レプリケーション・PBS によるバックアップ設計
+- 10GbE フルメッシュ（OpenFabric）と Ceph による共有ストレージ、HA ノードアフィニティでの配置設計
 - IX2215 での VLAN・サブインターフェース・VLAN 間フィルタ・VRRP・静的 LAG
 - Cloudflare Tunnel と Oracle Cloud＋Tailscale を使った「ポートを開けない」外部公開
 - HAProxy の PROXY protocol と、それを受ける側（Velocity・Geyser）の設定の整合
