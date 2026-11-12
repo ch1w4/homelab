@@ -166,6 +166,7 @@ relay01 は Tailscale の ACL で **mc01 のゲームポート（TCP 25565 / UDP
 - IX2215 での VLAN・サブインターフェース・VLAN 間フィルタ・VRRP・静的 LAG
 - VRRP と PPPoE のセッション数の関係（急な電源断のあと古いセッションが残り、復帰した #1 がしばらくつながらない）
 - AP（WAPM-1166D）の有線ポートを「Multiple（タグなし＋タグ付き）」にすると AP の中で VLAN が混ざり、ゲートウェイに届かなくなった。スイッチの MAC アドレス表で VRRP の仮想 MAC が別の VLAN に見えていることから特定し、全部タグ付きにして解決
+- IX の設定を startup-config から作り直したら、`write memory` していなかった dmz-in の許可（mc01 → vpn01 の返事）が消えてマイクラが止まった。vpn01 が Tailscale の通信を自分の IP に書き換える（SNAT）ことを確かめて原因を特定した。設定の控えは running-config で取る
 - Cloudflare Tunnel と Oracle Cloud＋Tailscale を使った「ポートを開けない」外部公開
 - HAProxy の PROXY protocol と、それを受ける側（Velocity・Geyser）の設定の整合
 - NIC 障害からの HA の自動復旧と、原因（e1000e のハング）の切り分け
