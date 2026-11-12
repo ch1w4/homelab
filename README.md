@@ -4,7 +4,7 @@
 Proxmox VE 9 の3ノードクラスタを中心に、ゲームサーバー（Minecraft）・Webアプリ・基盤サービス（VPN・監視・バックアップ・Git）を動かしています。
 ネットワークは NEC IX2215 と Allied Telesis AT-x210 で VLAN を分け、外部公開は Cloudflare Tunnel と Oracle Cloud の中継サーバー経由にして、自宅のグローバル IP を公開していません。
 
-> 最終更新: 2026-11-13（現在稼働中の構成。計画中のものは「今後の予定」に分けて記載）
+> 最終更新: 2026-11-13 夜（現在稼働中の構成。計画中のものは「今後の予定」に分けて記載）
 
 ---
 
@@ -25,12 +25,11 @@ Proxmox VE 9 の3ノードクラスタを中心に、ゲームサーバー（Min
                                                      │
                               ┌──────────────────────┴──────────────┐
                               ▼                                     ▼
-                     [NEC IX2215]  ◀─ VRRP（VLAN50・家族用LAN）─▶ [YAMAHA RTX1200]
-                     PPPoE / NAT / VLAN間フィルタ                  待機系（検証中）
-                              │ LAG ×4（802.1Q trunk）
-                              ▼
-                     [Allied Telesis AT-x210-24GT]
-                              │ trunk（VLAN 20/30/50/99）
+                     [NEC IX2215 #1]  ◀── VRRP（全VLAN）──▶  [NEC IX2215 #2]
+                     Master・PPPoE / NAT / フィルタ          Backup・PPPoE 待機
+                              │ LAG ×4                              │ LAG ×4
+                              └──────────▶ [Allied Telesis AT-x210-24GT] ◀──────────┘
+                                                 │ trunk（VLAN 20/30/50/99）・AP 用 trunk（10/50/60/99）
               ┌───────────────┼────────────────┐
               ▼               ▼                ▼
         ① pve-mc        ② pve-app        ③ pve-infra
@@ -53,9 +52,9 @@ Proxmox VE 9 の3ノードクラスタを中心に、ゲームサーバー（Min
 
 | 機器 | 役割 |
 |---|---|
-| NEC UNIVERGE IX2215 | エッジルーター（PPPoE・NAT・VLAN 間フィルタ・DHCP・DNS キャッシュ） |
-| YAMAHA RTX1200 | VRRP の待機系（VLAN50 と家族用 LAN、切替テスト待ち） |
-| Allied Telesis AT-x210-24GT | L2 スイッチ（IX2215 とは静的 LAG ×4） |
+| NEC UNIVERGE IX2215 ×2 | エッジルーター（PPPoE・NAT・VLAN 間フィルタ・DHCP・DNS キャッシュ）。全 VLAN を VRRP で冗長化 |
+| Allied Telesis AT-x210-24GT | L2 スイッチ（IX2215 2台とそれぞれ静的 LAG ×4） |
+| BUFFALO WAPM-1166D | 無線 AP（SSID ごとに VLAN：lab=10・test=50・guest=60）。PoE は TP-Link TL-SG1005P |
 | NEC Aterm WH832A | PPPoE ブリッジ・家族用 Wi-Fi |
 
 ノードは全て静音・省電力を優先したデスクトップ機です（以前はラックサーバー2台構成）。
@@ -73,8 +72,18 @@ Proxmox VE 9 の3ノードクラスタを中心に、ゲームサーバー（Min
 | 20 | サーバー | 192.168.20.0/24 | DB・Git・VPN・監視・バックアップ |
 | 30 | DMZ | 192.168.30.0/24 | 外部公開するもの（proxy01・mc01） |
 | 50 | 検証 | 192.168.50.0/24 | テスト用 VM・VRRP 検証 |
-| 99 | 管理 | 192.168.99.0/24 | Proxmox・スイッチなどの管理画面 |
+| 60 | ゲスト | 192.168.60.0/24 | SSID guest（インターネットだけ） |
+| 99 | 管理 | 192.168.99.0/24 | Proxmox・スイッチ・IX・AP の管理画面 |
 | — | Ceph | 192.168.100.0/24 | 10GbE 直結（スイッチ・ルーターを通らない） |
+
+---
+
+### 冗長化（2026-11-13 構築）
+
+- **ゲートウェイ**：IX2215 2台で全 VLAN と家族用 LAN を VRRP（仮想 IP は各 VLAN の `.1`、実 IP は #1 `.252`／#2 `.253`）。#1 が優先度 200 で Master、preempt は両方なし。
+- **PPPoE**：コミュファは同じ ID で 2 セッションまで張れるので、2台とも常時接続。#1 の電源断テストで、切り替えは約 3 秒。
+- **DHCP**：範囲を前半（#1）・後半（#2）に分けて、2台とも配る。
+- **LAG**：IX は LACP 非対応なので静的 LAG ×4 を2組（スイッチ側は edgeport にして、つないだ直後に STP で止まらないようにした）。
 
 ---
 
@@ -139,8 +148,9 @@ relay01 は Tailscale の ACL で **mc01 のゲームポート（TCP 25565 / UDP
 
 ## 今後の予定
 
-- [ ] IX2215 を2台にして全 VLAN を VRRP 化（RTX1200 を置き換え）、回線断の切替（watch-group）
-- [ ] 無線 AP（SSID ごとに VLAN）とゲスト用 VLAN60
+- [x] IX2215 を2台にして全 VLAN を VRRP 化（RTX1200 を置き換え）（2026-11）
+- [x] 無線 AP（SSID ごとに VLAN）とゲスト用 VLAN60（2026-11）
+- [ ] 回線だけ切れたときの切替（watch-group）
 - [ ] Prometheus・Grafana・Alertmanager による監視基盤、Loki・Oxidized
 - [x] 3ノードを 10GbE で直結（フルメッシュ）し、Ceph で HA 対象を共有ストレージ化（2026-11）
 - [ ] ③のメモリを 32GB に増設
@@ -154,6 +164,8 @@ relay01 は Tailscale の ACL で **mc01 のゲームポート（TCP 25565 / UDP
 - Proxmox クラスタ・HA・ZFS レプリケーション・PBS によるバックアップ設計
 - 10GbE フルメッシュ（OpenFabric）と Ceph による共有ストレージ、HA ノードアフィニティでの配置設計
 - IX2215 での VLAN・サブインターフェース・VLAN 間フィルタ・VRRP・静的 LAG
+- VRRP と PPPoE のセッション数の関係（急な電源断のあと古いセッションが残り、復帰した #1 がしばらくつながらない）
+- AP（WAPM-1166D）の有線ポートを「Multiple（タグなし＋タグ付き）」にすると AP の中で VLAN が混ざり、ゲートウェイに届かなくなった。スイッチの MAC アドレス表で VRRP の仮想 MAC が別の VLAN に見えていることから特定し、全部タグ付きにして解決
 - Cloudflare Tunnel と Oracle Cloud＋Tailscale を使った「ポートを開けない」外部公開
 - HAProxy の PROXY protocol と、それを受ける側（Velocity・Geyser）の設定の整合
 - NIC 障害からの HA の自動復旧と、原因（e1000e のハング）の切り分け
