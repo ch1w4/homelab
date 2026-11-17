@@ -30,7 +30,7 @@ Proxmox VE 9 の3ノードクラスタを中心に、ゲームサーバー（Min
                      [NEC IX2215 #1]  ◀── VRRP（全VLAN）──▶  [NEC IX2215 #2]
                      Master・PPPoE / NAT / フィルタ          Backup・PPPoE 待機
                               │ LAG ×4                              │ LAG ×4
-                              └──────────▶ [Allied Telesis AT-x210-24GT] ◀──────────┘
+                              └──▶ [Allied Telesis AT-x210-24GT] ◀──┘
                                                  │ trunk（VLAN 20/30/50/99）・AP 用 trunk（10/50/60/99）
               ┌───────────────┼────────────────┐
               ▼               ▼                ▼
