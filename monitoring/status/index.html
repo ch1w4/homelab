@@ -1,0 +1,632 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>chiwa-lab 監視ボード</title>
+<style>
+  :root{
+    --page:#0d0d0d; --surface:#1a1a19; --surface2:#222220; --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,.10);
+    --ink:#f0efec; --ink2:#c3c2b7; --muted:#898781;
+    --good:#0ca30c; --warn:#fab219; --crit:#d03b3b; --idle:#383835;
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+    --font:"Noto Sans JP","Hiragino Sans","Yu Gothic UI",system-ui,sans-serif;
+    --mono:"Cascadia Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--page);color:var(--ink);font-family:var(--font);font-size:15px;line-height:1.55;
+       background-image:radial-gradient(1200px 500px at 15% -10%,rgba(57,135,229,.10),transparent 60%),radial-gradient(900px 400px at 100% 0,rgba(25,158,112,.07),transparent 60%)}
+  .wrap{max-width:1400px;margin:0 auto;padding:18px 24px 48px}
+  .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+  /* header */
+  header{display:flex;align-items:center;gap:22px;flex-wrap:wrap;margin-bottom:16px}
+  .brand{display:flex;align-items:center;gap:10px}
+  .brand .logo{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,var(--s1),var(--s3));display:grid;place-items:center;font-weight:800;font-size:15px;color:#fff}
+  .brand b{font-size:19px;letter-spacing:.03em}
+  .brand small{color:var(--muted);font-size:12px;display:block;line-height:1.1}
+  nav{display:flex;gap:4px;background:var(--surface);border:1px solid var(--ring);border-radius:10px;padding:4px}
+  nav a{color:var(--ink2);text-decoration:none;padding:6px 14px;border-radius:7px;font-size:14px}
+  nav a.on{background:var(--surface2);color:var(--ink);box-shadow:inset 0 0 0 1px var(--ring)}
+  .hdr-r{margin-left:auto;text-align:right}
+  .hdr-r .clock{font-family:var(--mono);font-size:20px;letter-spacing:.04em}
+  .hdr-r .upd{color:var(--muted);font-size:12px}
+  .live{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--good);margin-right:6px;vertical-align:middle;animation:pulse 2s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(12,163,12,.6)}70%{box-shadow:0 0 0 8px rgba(12,163,12,0)}100%{box-shadow:0 0 0 0 rgba(12,163,12,0)}}
+
+  /* common */
+  .panel{background:var(--surface);border:1px solid var(--ring);border-radius:14px;padding:14px 16px;min-width:0;position:relative}
+  .ptitle{display:flex;align-items:baseline;gap:10px;margin-bottom:8px}
+  .ptitle h3{margin:0;font-size:14px;font-weight:600;color:var(--ink)}
+  .ptitle span{font-size:12px;color:var(--muted)}
+  .ptitle .r{margin-left:auto}
+  h2{font-size:13px;font-weight:600;color:var(--ink2);margin:22px 0 10px;letter-spacing:.12em;display:flex;align-items:center;gap:10px}
+  h2::after{content:"";flex:1;height:1px;background:var(--grid)}
+  .grid{display:grid;gap:12px}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:2px 9px;border-radius:99px;background:var(--surface2);border:1px solid var(--ring);color:var(--ink2)}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--idle);flex:none;display:inline-block}
+  .st-good .dot,.dot.good{background:var(--good)} .st-warn .dot,.dot.warn{background:var(--warn)} .st-crit .dot,.dot.crit{background:var(--crit)}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--ink2)}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .legend i{width:14px;height:3px;border-radius:2px;display:inline-block}
+  .legend i.sq{height:9px;width:12px}
+  .muted{color:var(--muted)}
+  .err{color:var(--crit);font-size:13px;margin-top:10px}
+
+  /* hero */
+  .hero{grid-template-columns:1.25fr repeat(4,1fr)}
+  .status{display:flex;align-items:center;gap:18px;overflow:hidden}
+  .status .lamp{width:58px;height:58px;border-radius:50%;flex:none;display:grid;place-items:center;background:var(--idle)}
+  .status .lamp svg{width:30px;height:30px}
+  .status.good .lamp{background:var(--good);box-shadow:0 0 0 8px rgba(12,163,12,.15),0 0 40px rgba(12,163,12,.35)}
+  .status.crit{border-color:var(--crit)}
+  .status.crit .lamp{background:var(--crit);box-shadow:0 0 0 8px rgba(208,59,59,.2),0 0 40px rgba(208,59,59,.45);animation:blink 1s steps(1) infinite}
+  @keyframes blink{50%{opacity:.45}}
+  .status b{font-size:30px;letter-spacing:.05em;display:block;line-height:1.2}
+  .status span{color:var(--ink2);font-size:13px}
+  .kpi .k{font-size:12px;color:var(--ink2)}
+  .kpi .v{font-size:30px;font-weight:600;line-height:1.15;margin-top:4px}
+  .kpi .v small{font-size:14px;color:var(--ink2);font-weight:400;margin-left:3px}
+  .kpi .s{font-size:12px;color:var(--muted);margin-top:2px}
+  .kpi svg.spark{display:block;width:100%;height:34px;margin-top:6px}
+  .kpi a{color:inherit}
+
+  /* route cards */
+  .route{grid-template-columns:repeat(5,1fr)}
+  .rc .k{font-size:12px;color:var(--muted)}
+  .rc .v{font-size:17px;font-weight:600;margin-top:2px;display:flex;align-items:center;gap:8px}
+  .rc .s{font-size:12px;color:var(--ink2);margin-top:4px}
+  .rc.st-crit{border-color:var(--crit)} .rc.st-warn{border-color:var(--warn)}
+  .chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+
+  /* nodes */
+  .nodes{grid-template-columns:repeat(3,1fr)}
+  .node .head{display:flex;align-items:center;gap:10px}
+  .node .head b{font-size:18px}
+  .node .head .role{font-size:12px;color:var(--muted);margin-left:auto}
+  .gauges{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin:10px 0 4px}
+  .gauge{text-align:center}
+  .gauge svg{width:100%;max-width:120px;height:auto;display:block;margin:0 auto}
+  .gauge .lbl{font-size:12px;color:var(--ink2);margin-top:-4px}
+  .node.st-crit{border-color:var(--crit)}
+
+  /* charts */
+  .charts{grid-template-columns:1fr 1fr}
+  .chart{position:relative}
+  .chart svg{display:block;width:100%;overflow:visible}
+  .chart .ax{font-family:var(--mono);font-size:10.5px;fill:var(--muted)}
+  .tip{position:fixed;pointer-events:none;z-index:9;background:#0d0d0d;border:1px solid var(--axis);border-radius:8px;padding:7px 10px;font-size:12px;
+       box-shadow:0 6px 24px rgba(0,0,0,.5);display:none;min-width:130px}
+  .tip .t{font-family:var(--mono);color:var(--muted);margin-bottom:3px}
+  .tip .row{display:flex;align-items:center;gap:7px;justify-content:space-between}
+  .tip .row i{width:10px;height:3px;border-radius:2px;display:inline-block;margin-right:6px}
+  .tip .row b{font-family:var(--mono);font-weight:500}
+  .seg{display:flex;gap:2px;background:var(--surface2);border:1px solid var(--ring);border-radius:8px;padding:2px}
+  .seg button{background:none;border:0;color:var(--ink2);font:inherit;font-size:12px;padding:3px 10px;border-radius:6px;cursor:pointer}
+  .seg button.on{background:var(--grid);color:var(--ink)}
+
+  /* timeline */
+  .tl .row{display:grid;grid-template-columns:8em 1fr 4.6em;align-items:center;gap:12px;margin:7px 0}
+  .tl .row .name{font-size:13px}
+  .tl .row .pct{font-family:var(--mono);font-size:12px;color:var(--ink2);text-align:right}
+  .tl svg.bar{width:100%;height:18px;display:block}
+  .tl .axis{display:grid;grid-template-columns:8em 1fr 4.6em;gap:12px;font-family:var(--mono);font-size:10.5px;color:var(--muted)}
+  .tl .axis div{display:flex;justify-content:space-between}
+  .two{grid-template-columns:1.3fr 1fr}
+  .list{list-style:none;margin:0;padding:0}
+  .list li{display:grid;grid-template-columns:7em 1fr;gap:10px;padding:8px 0;border-top:1px solid var(--grid);font-size:13.5px}
+  .list li:first-child{border-top:0}
+  .list time{font-family:var(--mono);color:var(--muted);font-size:12.5px}
+  .list .big{font-family:var(--mono);font-weight:600;color:var(--good)}
+  .empty{color:var(--muted);font-size:13px;padding:6px 0;display:block!important}
+
+  /* tests */
+  .intro{display:grid;grid-template-columns:1.4fr 1fr;gap:12px}
+  .flow{display:flex;gap:6px;align-items:stretch;margin-top:8px;flex-wrap:wrap}
+  .flow div{flex:1;min-width:110px;background:var(--surface2);border:1px solid var(--ring);border-radius:10px;padding:8px 10px;font-size:12.5px}
+  .flow div b{display:block;font-size:13px;color:var(--ink);margin-bottom:2px}
+  .flow div em{font-style:normal;font-family:var(--mono);color:var(--s1);font-size:11px}
+  .tkpi{grid-template-columns:repeat(4,1fr)}
+  table.mx{width:100%;border-collapse:collapse;font-size:13px}
+  table.mx th{font-weight:500;color:var(--muted);font-size:12px;text-align:left;padding:6px 8px;border-bottom:1px solid var(--axis);white-space:nowrap}
+  table.mx td{padding:9px 8px;border-bottom:1px solid var(--grid);vertical-align:middle}
+  table.mx td.n,table.mx th.n{text-align:right;font-family:var(--mono);white-space:nowrap}
+  table.mx tr:last-child td{border-bottom:0}
+  .badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;padding:1px 8px;border-radius:99px;border:1px solid var(--ring);white-space:nowrap}
+  .badge.pass{color:var(--good);border-color:rgba(12,163,12,.5)}
+  .badge.fail{color:#ff7b7b;border-color:rgba(208,59,59,.6)}
+  .badge.todo{color:var(--ink2)} .badge.plan{color:var(--muted);border-style:dashed}
+  .na{color:var(--muted);font-family:var(--font)!important;font-size:12px}
+  details.test{background:var(--surface);border:1px solid var(--ring);border-radius:14px;margin-bottom:10px}
+  details.test summary{list-style:none;cursor:pointer;padding:13px 16px;display:flex;align-items:center;gap:12px}
+  details.test summary::-webkit-details-marker{display:none}
+  details.test summary .kind{font-size:11px;color:var(--muted);border:1px solid var(--ring);border-radius:6px;padding:1px 7px}
+  details.test summary b{font-size:15px}
+  details.test summary .r{margin-left:auto;display:flex;gap:16px;align-items:center;font-size:12px;color:var(--ink2)}
+  details.test summary .chev{transition:transform .2s;color:var(--muted)}
+  details.test[open] summary .chev{transform:rotate(90deg)}
+  .tbody{padding:0 16px 16px;display:grid;grid-template-columns:1fr 1.2fr;gap:16px}
+  .tbody h4{margin:10px 0 4px;font-size:12px;color:var(--muted);font-weight:600;letter-spacing:.08em}
+  .tbody ol{margin:0;padding-left:1.3em;font-size:13.5px} .tbody ol li{margin:3px 0}
+  .tbody p{margin:0;font-size:13.5px}
+  .kv{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .kv div{background:var(--surface2);border:1px solid var(--ring);border-radius:10px;padding:8px 10px}
+  .kv div span{font-size:11.5px;color:var(--muted);display:block}
+  .kv div b{font-family:var(--mono);font-size:20px;font-weight:600}
+  .kv div b small{font-size:12px;color:var(--ink2);font-weight:400}
+  .kv div em{font-style:normal;font-size:11px;color:var(--muted);display:block}
+  @media (max-width:1100px){.hero{grid-template-columns:1fr 1fr}.status{grid-column:1/-1}.route{grid-template-columns:repeat(2,1fr)}.nodes,.charts,.two,.intro,.tbody{grid-template-columns:1fr}.tkpi{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand"><div class="logo">C</div><div><b>chiwa-lab</b><small>自宅インフラ 監視ボード</small></div></div>
+    <nav><a href="#now" id="tab-now">いまの状態</a><a href="#tests" id="tab-tests">障害試験の結果</a></nav>
+    <div class="hdr-r"><div class="clock" id="clock">--:--:--</div><div class="upd"><span class="live"></span><span id="upd">読み込み中…</span></div></div>
+  </header>
+
+  <!-- ================= いまの状態 ================= -->
+  <section id="view-now">
+    <div class="grid hero">
+      <div class="panel status" id="status"><div class="lamp"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" id="lampIcon"><path d="M5 12l5 5 9-10"/></svg></div>
+        <div><b id="statusText">確認中</b><span id="statusSub">Prometheus から読み込んでいます</span></div></div>
+      <div class="panel kpi"><div class="k">外までの応答</div><div class="v num" id="kWan">—<small>ms</small></div><svg class="spark" id="sWan"></svg><div class="s">直近1時間</div></div>
+      <div class="panel kpi"><div class="k">稼働率（7日・インターネット）</div><div class="v num" id="kUp">—<small>%</small></div><svg class="spark" id="sUp"></svg><div class="s" id="kUpSub">サーバー3台とも —</div></div>
+      <div class="panel kpi"><div class="k">鳴っているアラート</div><div class="v num" id="kAl">—<small>件</small></div><svg class="spark" id="sAl"></svg><div class="s">直近24時間の件数の推移</div></div>
+      <div class="panel kpi"><div class="k">障害試験（実施済み）</div><div class="v num" id="kTest">—</div><div class="s" id="kTestSub">&nbsp;</div><div class="s"><a href="#tests">試験の結果を見る →</a></div></div>
+    </div>
+
+    <h2>入口と経路</h2>
+    <div class="grid route" id="route"></div>
+
+    <h2>サーバー（Proxmox 3台）</h2>
+    <div class="grid nodes" id="nodes"></div>
+
+    <h2 style="justify-content:space-between">グラフ <span class="seg" id="range" style="margin-left:auto;order:2"><button data-r="3600">1時間</button><button data-r="21600">6時間</button><button data-r="86400" class="on">24時間</button><button data-r="604800">7日</button></span></h2>
+    <div class="grid charts">
+      <div class="panel"><div class="ptitle"><h3>CPU 使用率</h3><span>%</span><div class="r legend" id="lg-cpu"></div></div><div class="chart" id="cCpu"></div></div>
+      <div class="panel"><div class="ptitle"><h3>メモリ使用率</h3><span>%</span><div class="r legend" id="lg-mem"></div></div><div class="chart" id="cMem"></div></div>
+      <div class="panel"><div class="ptitle"><h3>外までの応答時間</h3><span>ms（mon01 → 外）</span></div><div class="chart" id="cWan"></div></div>
+      <div class="panel"><div class="ptitle"><h3>回線の通信量（IX #1）</h3><span>Mbps</span><div class="r legend"><span><i style="background:var(--s1)"></i>受信</span><span><i style="background:var(--s2)"></i>送信</span></div></div><div class="chart" id="cNet"></div></div>
+    </div>
+
+    <h2>止まっても戻る：直近24時間の記録</h2>
+    <div class="panel tl">
+      <div id="tlRows"></div>
+      <div class="axis"><span></span><div id="tlAxis"></div><span style="text-align:right">稼働率</span></div>
+      <div class="legend" style="margin-top:10px">
+        <span><i class="sq" style="background:var(--good)"></i>正常（#1が担当／動いている）</span>
+        <span><i class="sq" style="background:var(--warn)"></i>#2が代わりに担当</span>
+        <span><i class="sq" style="background:var(--crit)"></i>止まっていた</span>
+        <span><i class="sq" style="background:var(--idle)"></i>記録なし</span>
+      </div>
+    </div>
+    <div class="grid two" style="margin-top:12px">
+      <div class="panel"><div class="ptitle"><h3>切り替え・復旧の記録</h3><span>24時間</span></div><ul class="list" id="events"><li class="empty">読み込み中…</li></ul></div>
+      <div class="panel"><div class="ptitle"><h3>いま鳴っているアラート</h3></div><ul class="list" id="alerts"><li class="empty">読み込み中…</li></ul></div>
+    </div>
+  </section>
+
+  <!-- ================= 障害試験 ================= -->
+  <section id="view-tests" hidden>
+    <div class="intro">
+      <div class="panel">
+        <div class="ptitle"><h3>試験のやり方：わざと止めて、秒で測る</h3></div>
+        <p style="margin:0;font-size:13.5px;color:var(--ink2)">本番と同じ機器を実際に止め、計測スクリプト（failtest.sh）で 0.5 秒ごとに通信を確認します。Enter を押した瞬間を <b class="num" style="color:var(--ink)">T0</b> として、次の時間を記録します。</p>
+        <div class="flow">
+          <div><em>T0</em><b>障害を起こす</b>電源を抜く・回線を切る・プロセスを止める</div>
+          <div><em>止まり始め</em><b>通信が途切れる</b>ping / TCP が失敗し始めた時刻</div>
+          <div><em>検知時間</em><b>通知が出る</b>Alertmanager にアラートが出た時刻（Discord へ）</div>
+          <div><em>復旧時間</em><b>元に戻る</b>通信が戻った時刻。止まっていた長さ＝停止時間</div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="ptitle"><h3>読み方</h3></div>
+        <ul style="margin:0;padding-left:1.2em;font-size:13px;color:var(--ink2)">
+          <li><b style="color:var(--ink)">停止時間</b>：利用者から見て使えなかった時間</li>
+          <li><b style="color:var(--ink)">検知時間</b>：T0 から管理者に通知が届くまで</li>
+          <li><b style="color:var(--ink)">検知時間</b>が停止時間より長いのは、自動で直った場合です。利用者への影響はすでに終わっていて、通知は「壊れた機器を直してください」という管理者向けの知らせです。一瞬の乱れで誤報を出さないよう、通知は一定時間続いてから出します</li>
+          <li><b style="color:var(--ink)">目標</b>：試験の前に自分で決めた合格ライン</li>
+          <li>確認は 0.5 秒ごとなので、誤差は ±1 秒ほどです</li>
+          <li>グラフは Prometheus に残っている実データです（保存は約15日）</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="grid tkpi" style="margin-top:12px" id="tkpi"></div>
+
+    <h2>シナリオ別の結果</h2>
+    <div class="grid" style="grid-template-columns:1.25fr 1fr">
+      <div class="panel"><div class="ptitle"><h3>結果の一覧</h3><span id="tUpdated"></span></div><table class="mx" id="matrix"></table></div>
+      <div class="panel"><div class="ptitle"><h3>停止時間と検知時間の比較</h3><span>秒</span><div class="r legend"><span><i class="sq" style="background:var(--s2)"></i>停止時間</span><span><i class="sq" style="background:var(--s1)"></i>検知時間</span></div></div><div class="chart" id="cCompare"></div></div>
+    </div>
+
+    <h2>試験の記録（方法・数値・証拠グラフ）</h2>
+    <div id="testList"></div>
+
+    <h2>運用の数値</h2>
+    <div class="panel"><table class="mx" id="ops"></table></div>
+  </section>
+
+  <div class="err" id="err"></div>
+</div>
+<div class="tip" id="tip"></div>
+
+<script>
+const API = 'api/v1/';
+const NODES = [
+  {name:'① pve-mc',   role:'マイクラ専用',          inst:'192.168.99.11:9100', color:'var(--s1)'},
+  {name:'② pve-app',  role:'Web・アプリ・DB',       inst:'192.168.99.12:9100', color:'var(--s2)'},
+  {name:'③ pve-infra',role:'VPN・監視・バックアップ', inst:'192.168.99.13:9100', color:'var(--s3)'},
+];
+const SERVICES = [
+  {name:'マイクラ', inst:'192.168.30.20:25565'},
+  {name:'DB', inst:'192.168.20.40:5432'},
+  {name:'Git', inst:'192.168.20.45:3000'},
+];
+const ALERT_JA = {
+  WanDown:'インターネットに出られない', RouterDown:'ルーターかスイッチに届かない', NodeDown:'サーバーが止まった',
+  ServiceDown:'サービスのポートが閉じた', VrrpFailover:'ルーターが #2 に切り替わった', VrrpSplitBrain:'ルーターが2台とも担当になっている',
+  DiskLow:'ディスクの空きが少ない', MemoryHigh:'メモリが足りない', CpuHigh:'CPUが忙しすぎる', TempHigh:'温度が高い',
+};
+const $ = id => document.getElementById(id);
+const esc = s => String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const hm = t => new Date(t*1000).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});
+const md = t => { const d=new Date(t*1000); return `${d.getMonth()+1}/${d.getDate()}`; };
+const hms = t => new Date(t*1000).toLocaleTimeString('ja-JP');
+const dur = s => s==null?'—':s<60?`${(+s).toFixed(s<10?1:0)}秒`:s<3600?`${Math.floor(s/60)}分${Math.round(s%60)?Math.round(s%60)+'秒':''}`:`${Math.floor(s/3600)}時間${Math.round(s%3600/60)}分`;
+
+// ---------------- Prometheus ----------------
+async function q(expr){
+  const r = await fetch(API+'query?query='+encodeURIComponent(expr));
+  const j = await r.json(); if(j.status!=='success') throw new Error(j.error||'query');
+  return j.data.result;
+}
+async function qr(expr,start,end,step){
+  const r = await fetch(`${API}query_range?query=${encodeURIComponent(expr)}&start=${start}&end=${end}&step=${step}`);
+  const j = await r.json(); if(j.status!=='success') throw new Error(j.error||'query_range');
+  return j.data.result;
+}
+const v1 = res => res.length ? Number(res[0].value[1]) : null;
+const byInst = (res,inst) => { const x=res.find(r=>r.metric.instance===inst); return x?Number(x.value[1]):null; };
+const ptsOf = (res,inst) => { const x = inst? res.find(r=>r.metric.instance===inst) : res[0]; return x? x.values.map(([t,v])=>[t,Number(v)]) : []; };
+
+// ---------------- chart primitives ----------------
+const tip = $('tip');
+function showTip(ev,html){ tip.innerHTML=html; tip.style.display='block';
+  const w=tip.offsetWidth, x=ev.clientX+14+w>innerWidth? ev.clientX-w-14 : ev.clientX+14; tip.style.left=x+'px'; tip.style.top=(ev.clientY+12)+'px'; }
+function hideTip(){ tip.style.display='none'; }
+function niceMax(v){ if(!(v>0)) return 1; const p=10**Math.floor(Math.log10(v)); const n=v/p; return (n<=1?1:n<=2?2:n<=2.5?2.5:n<=5?5:10)*p; }
+const fmtN = v => v==null||isNaN(v)?'—':v===0?'0':Math.abs(v)>=100?v.toFixed(0):Math.abs(v)>=10?v.toFixed(1):v.toFixed(2);
+
+/* line / area chart. series:[{name,color,pts:[[t,v]]}] o:{start,end,step,h,max,min,unit,area,fmt,marks:[{t,label,color}],xfmt} */
+function lineChart(el,series,o={}){
+  const W = Math.max(300, el.clientWidth||600), H = o.h||190, L=40, R=8, T=10, B=22, pw=W-L-R, ph=H-T-B;
+  const all = series.flatMap(s=>s.pts.map(p=>p[1])).filter(v=>!isNaN(v));
+  const ymin = o.min??0, ymax = o.max ?? niceMax(Math.max(...all, 0)*1.1);
+  const x = t => L + (t-o.start)/(o.end-o.start)*pw, y = v => T + ph - (v-ymin)/(ymax-ymin||1)*ph;
+  const fmt = o.fmt||fmtN, xf = o.xfmt || ((o.end-o.start)>2*86400? md : hm);
+  let g='';
+  for(let i=0;i<=4;i++){ const v=ymin+(ymax-ymin)*i/4, yy=y(v);
+    g+=`<line x1="${L}" x2="${W-R}" y1="${yy}" y2="${yy}" stroke="${i?'var(--grid)':'var(--axis)'}" stroke-width="1"/><text class="ax" x="${L-6}" y="${yy+3.5}" text-anchor="end">${fmt(v)}</text>`; }
+  for(let i=0;i<=4;i++){ const t=o.start+(o.end-o.start)*i/4; g+=`<text class="ax" x="${x(t)}" y="${H-5}" text-anchor="${i==0?'start':i==4?'end':'middle'}">${xf(t)}</text>`; }
+  const gap = (o.step||60)*2.5;
+  const path = pts => { let d='',prev=null; for(const [t,v] of pts){ if(isNaN(v)) {prev=null;continue;} d+=(prev==null||t-prev>gap?'M':'L')+x(t).toFixed(1)+','+y(Math.min(v,ymax)).toFixed(1); prev=t; } return d; };
+  let defs='', body='';
+  series.forEach((s,i)=>{
+    const d = path(s.pts); if(!d) return;
+    if(o.area){ const id='g'+Math.random().toString(36).slice(2,8);
+      defs+=`<linearGradient id="${id}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${s.color}" stop-opacity=".35"/><stop offset="1" stop-color="${s.color}" stop-opacity="0"/></linearGradient>`;
+      d.split('M').filter(Boolean).forEach(seg=>{ const pts=seg.split('L'); const x0=pts[0].split(',')[0], x1=pts[pts.length-1].split(',')[0];
+        body+=`<path d="M${seg}L${x1},${T+ph}L${x0},${T+ph}Z" fill="url(#${id})"/>`; }); }
+    body+=`<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  });
+  (o.marks||[]).forEach((m,mi)=>{ if(m.t<o.start||m.t>o.end) return; const xx=x(m.t);
+    body+=`<line x1="${xx}" x2="${xx}" y1="${T}" y2="${T+ph}" stroke="${m.color||'var(--ink2)'}" stroke-dasharray="3 3"/><text class="ax" x="${xx+4}" y="${T+10+mi*12}" style="fill:${m.color||'var(--ink2)'}">${esc(m.label)}</text>`; });
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" height="${H}"><defs>${defs}</defs>${g}${body}<g class="hov" style="display:none"><line y1="${T}" y2="${T+ph}" stroke="var(--ink2)" stroke-width="1"/>${series.map(s=>`<circle r="4.5" fill="${s.color}" stroke="var(--surface)" stroke-width="2"/>`).join('')}</g><rect x="${L}" y="${T}" width="${pw}" height="${ph}" fill="transparent"/></svg>`;
+  const svg = el.querySelector('svg'), hov = svg.querySelector('.hov'), ln = hov.querySelector('line'), cs = hov.querySelectorAll('circle');
+  const ref = series.reduce((a,s)=>s.pts.length>a.length?s.pts:a,[]);
+  svg.querySelector('rect').onmousemove = ev => {
+    if(!ref.length) return;
+    const bb = svg.getBoundingClientRect(), mx = (ev.clientX-bb.left)*W/bb.width, t = o.start+(mx-L)/pw*(o.end-o.start);
+    let best = ref[0][0]; for(const p of ref) if(Math.abs(p[0]-t)<Math.abs(best-t)) best=p[0];
+    hov.style.display=''; ln.setAttribute('x1',x(best)); ln.setAttribute('x2',x(best));
+    let rows='';
+    series.forEach((s,i)=>{ const p=s.pts.find(p=>p[0]===best); if(p&&!isNaN(p[1])){ cs[i].setAttribute('cx',x(best)); cs[i].setAttribute('cy',y(Math.min(p[1],ymax))); cs[i].style.display=''; } else cs[i].style.display='none';
+      rows+=`<div class="row"><span><i style="background:${s.color}"></i>${esc(s.name)}</span><b>${p?fmt(p[1]):'—'}${o.unit||''}</b></div>`; });
+    showTip(ev,`<div class="t">${new Date(best*1000).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit',second:o.sec?'2-digit':undefined})}</div>${rows}`);
+  };
+  svg.querySelector('rect').onmouseleave = ()=>{ hov.style.display='none'; hideTip(); };
+}
+
+function spark(svg,pts,color,o={}){
+  const W=200,H=34; svg.setAttribute('viewBox',`0 0 ${W} ${H}`); svg.setAttribute('preserveAspectRatio','none');
+  const v=pts.map(p=>p[1]).filter(x=>!isNaN(x)); if(!v.length){ svg.innerHTML=''; return; }
+  const mn=o.min??Math.min(...v), mx=o.max??Math.max(...v), r=(mx-mn)||1, t0=pts[0][0], t1=pts[pts.length-1][0]||t0+1;
+  const P=pts.filter(p=>!isNaN(p[1])).map(p=>`${((p[0]-t0)/(t1-t0||1)*W).toFixed(1)},${(H-3-(p[1]-mn)/r*(H-6)).toFixed(1)}`);
+  svg.innerHTML=`<defs><linearGradient id="sg${svg.id}" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity=".3"/><stop offset="1" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>
+    <path d="M0,${H}L${P.join('L')}L${W},${H}Z" fill="url(#sg${svg.id})"/><path d="M${P.join('L')}" fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+}
+
+function gauge(val,max,unit,label,warn,crit){
+  const r=40, c=2*Math.PI*r, arc=0.75, has=val!=null&&!isNaN(val), f=has?Math.max(0,Math.min(1,val/max)):0;
+  const st = !has?'idle': val>=crit?'crit': val>=warn?'warn':'good';
+  const col = {idle:'var(--idle)',good:'var(--good)',warn:'var(--warn)',crit:'var(--crit)'}[st];
+  return `<div class="gauge" title="${label} ${has?val.toFixed(1)+unit:'—'}（注意 ${warn}${unit}／危険 ${crit}${unit}）"><svg viewBox="0 0 100 100">
+    <circle cx="50" cy="52" r="${r}" fill="none" stroke="var(--grid)" stroke-width="8" stroke-linecap="round" stroke-dasharray="${c*arc} ${c}" transform="rotate(135 50 52)"/>
+    <circle cx="50" cy="52" r="${r}" fill="none" stroke="${col}" stroke-width="8" stroke-linecap="round" stroke-dasharray="${Math.max(0.01,c*arc*f)} ${c}" transform="rotate(135 50 52)" style="transition:stroke-dasharray .6s"/>
+    <text x="50" y="56" text-anchor="middle" font-family="var(--mono)" font-size="21" font-weight="600" fill="var(--ink)">${has?val.toFixed(0):'—'}<tspan font-size="11" fill="var(--ink2)">${unit}</tspan></text>
+    ${st==='warn'||st==='crit'?`<text x="50" y="74" text-anchor="middle" font-size="10" fill="${col}">${st==='crit'?'危険':'注意'}</text>`:''}
+  </svg><div class="lbl">${label}</div></div>`;
+}
+
+// ---------------- いまの状態 ----------------
+function rc(k,v,st,s='',chips=''){ return `<div class="panel rc st-${st}"><div class="k">${k}</div><div class="v"><span class="dot"></span>${v}</div>${s?`<div class="s">${s}</div>`:''}${chips?`<div class="chips">${chips}</div>`:''}</div>`; }
+const chip = (name,ok) => `<span class="pill st-${ok?'good':'crit'}"><span class="dot"></span>${esc(name)}</span>`;
+
+async function refreshNow(){
+  const [alerts,wan,wanMs,vr1,vr2,tcp,routers,up,cpu,mem,temp] = await Promise.all([
+    q('ALERTS{alertstate="firing"}'),
+    q('max(probe_success{job="wan"})'),
+    q('avg(probe_duration_seconds{job="wan"})*1000'),
+    q('min(vrrpOperState{instance="192.168.99.252"})'),
+    q('max(vrrpOperState{instance="192.168.99.253"})'),
+    q('probe_success{job="tcp"}'),
+    q('probe_success{job="routers"}'),
+    q('up{job="node",role="pve"}'),
+    q('100*(1-avg by (instance)(rate(node_cpu_seconds_total{mode="idle",job="node",role="pve"}[5m])))'),
+    q('100*(1-node_memory_MemAvailable_bytes{role="pve"}/node_memory_MemTotal_bytes{role="pve"})'),
+    q('max by (instance)(node_hwmon_temp_celsius{role="pve"})'),
+  ]);
+  const n = alerts.length, st = $('status');
+  st.className = 'panel status '+(n?'crit':'good');
+  $('lampIcon').innerHTML = n ? '<path d="M12 6v8M12 18v.5"/>' : '<path d="M5 12l5 5 9-10"/>';
+  $('statusText').textContent = n ? `異常あり（${n}件）` : 'すべて正常';
+  $('statusSub').textContent = n ? '下の「いま鳴っているアラート」を確認。Discordにも通知済み' : '止まっているもの・調子の悪いものはありません';
+  $('kAl').innerHTML = `${n}<small>件</small>`;
+  const ms = v1(wanMs); $('kWan').innerHTML = `${ms!=null?ms.toFixed(1):'—'}<small>ms</small>`;
+
+  const w=v1(wan), a=v1(vr1), b=v1(vr2), mc=byInst(tcp,SERVICES[0].inst);
+  const ix1=byInst(routers,'192.168.99.252'), ix2=byInst(routers,'192.168.99.253'), sw=byInst(routers,'192.168.99.2');
+  let vr;
+  if(a===3&&b===2) vr=rc('ルーター（VRRP）','#1 が担当','good','#2 は待機中（切り替え準備OK）');
+  else if(b===3&&a!==3) vr=rc('ルーター（VRRP）','#2 が代わりに担当','warn','#1 が止まっているか、回線が切れている');
+  else if(a===3&&b===3) vr=rc('ルーター（VRRP）','2台とも担当','crit','異常：役割がぶつかっている');
+  else vr=rc('ルーター（VRRP）','確認できない','crit');
+  const allR = ix1===1&&ix2===1&&sw===1, allS = SERVICES.every(s=>byInst(tcp,s.inst)===1);
+  $('route').innerHTML =
+    rc('インターネット', w===1?'つながっている':'つながらない', w===1?'good':'crit', ms!=null?`外までの応答 <span class="num">${ms.toFixed(1)}ms</span>`:'') + vr +
+    rc('ネットワーク機器', allR?'3台とも応答':'応答しない機器あり', allR?'good':'crit','', chip('IX #1',ix1===1)+chip('IX #2',ix2===1)+chip('スイッチ',sw===1)) +
+    rc('マイクラ', mc===1?'遊べる':'止まっている', mc===1?'good':'crit', '家の中から見たポートの状態') +
+    rc('サービス', allS?'すべて動いている':'止まっているものあり', allS?'good':'crit','', SERVICES.map(s=>chip(s.name,byInst(tcp,s.inst)===1)).join(''));
+
+  $('nodes').innerHTML = NODES.map(nd=>{
+    const u=byInst(up,nd.inst);
+    return `<div class="panel node st-${u===1?'good':'crit'}"><div class="head"><span class="dot ${u===1?'good':'crit'}"></span><b>${nd.name}</b><span class="pill">${u===1?'動いている':'止まっている'}</span><span class="role">${nd.role}</span></div>
+      <div class="gauges">${gauge(byInst(cpu,nd.inst),100,'%','CPU',70,90)}${gauge(byInst(mem,nd.inst),100,'%','メモリ',80,90)}${gauge(byInst(temp,nd.inst),100,'℃','温度',70,85)}</div></div>`;
+  }).join('');
+
+  $('alerts').innerHTML = n ? alerts.map(x=>{
+    const nm=x.metric.alertname, where=x.metric.vrid?`VRID ${x.metric.vrid}`:(x.metric.instance||'');
+    const crit = x.metric.severity==='critical';
+    return `<li><time><span class="pill st-${crit?'crit':'warn'}"><span class="dot"></span>${crit?'重大':'注意'}</span></time><span>${esc(ALERT_JA[nm]||nm)}<br><span class="muted num" style="font-size:12px">${esc(where)}</span></span></li>`;
+  }).join('') : '<li class="empty">なし（すべて正常）</li>';
+}
+
+let RANGE = 86400;
+const stepFor = r => r<=3600?15 : r<=21600?60 : r<=86400?300 : 1800;
+async function refreshCharts(){
+  const end=Math.floor(Date.now()/1000), start=end-RANGE, step=stepFor(RANGE);
+  const [cpu,mem,wan,rx,tx] = await Promise.all([
+    qr('100*(1-avg by (instance)(rate(node_cpu_seconds_total{mode="idle",job="node",role="pve"}[5m])))',start,end,step),
+    qr('100*(1-node_memory_MemAvailable_bytes{role="pve"}/node_memory_MemTotal_bytes{role="pve"})',start,end,step),
+    qr('avg(probe_duration_seconds{job="wan"})*1000',start,end,step),
+    qr('rate(ifHCInOctets{instance="192.168.99.252",ifDescr="GigaEthernet0"}[5m])*8/1e6',start,end,step),
+    qr('rate(ifHCOutOctets{instance="192.168.99.252",ifDescr="GigaEthernet0"}[5m])*8/1e6',start,end,step),
+  ]);
+  const base={start,end,step};
+  const ns = res => NODES.map(nd=>({name:nd.name,color:nd.color,pts:ptsOf(res,nd.inst)}));
+  lineChart($('cCpu'),ns(cpu),{...base,max:100,unit:'%'});
+  lineChart($('cMem'),ns(mem),{...base,max:100,unit:'%'});
+  lineChart($('cWan'),[{name:'応答',color:'var(--s1)',pts:ptsOf(wan)}],{...base,unit:'ms',area:true});
+  lineChart($('cNet'),[{name:'受信',color:'var(--s1)',pts:ptsOf(rx)},{name:'送信',color:'var(--s2)',pts:ptsOf(tx)}],{...base,unit:'Mbps',area:true});
+  const lg = NODES.map(nd=>`<span><i style="background:${nd.color}"></i>${nd.name}</span>`).join('');
+  $('lg-cpu').innerHTML=lg; $('lg-mem').innerHTML=lg;
+}
+
+async function refreshSparks(){
+  const end=Math.floor(Date.now()/1000);
+  const [wan,al,up7,upN,upSpark] = await Promise.all([
+    qr('avg(probe_duration_seconds{job="wan"})*1000',end-3600,end,30),
+    qr('count(ALERTS{alertstate="firing"}) or vector(0)',end-86400,end,600),
+    q('avg_over_time(max(probe_success{job="wan"})[7d:5m])'),
+    q('avg_over_time(min(up{job="node",role="pve"})[7d:5m])'),
+    qr('avg_over_time(max(probe_success{job="wan"})[1d:5m])*100',end-7*86400,end,21600),
+  ]);
+  spark($('sWan'),ptsOf(wan),'var(--s1)');
+  spark($('sAl'),ptsOf(al),'var(--s2)',{min:0});
+  spark($('sUp'),ptsOf(upSpark),'var(--s3)',{max:100});
+  const p = r => r.length ? (Number(r[0].value[1])*100) : null;
+  const a=p(up7), b=p(upN);
+  $('kUp').innerHTML = `${a!=null?a.toFixed(2):'—'}<small>%</small>`;
+  $('kUpSub').textContent = `サーバー3台とも ${b!=null?b.toFixed(2)+'%':'—'}`;
+}
+
+// 24h timeline
+function segments(values,start,end,step,classify){
+  const map=new Map(values.map(([t,v])=>[Math.round(t),Number(v)])); const segs=[]; let cur=null;
+  for(let t=start;t<=end;t+=step){ const v=map.has(t)?map.get(t):null; const c=v==null?'idle':classify(v);
+    if(cur&&cur.c===c) cur.to=t+step; else { cur={from:t,to:t+step,c}; segs.push(cur); } }
+  return segs;
+}
+function tlBar(segs,start,end){
+  const W=1000, col={good:'var(--good)',warn:'var(--warn)',crit:'var(--crit)',idle:'var(--idle)'};
+  return `<svg class="bar" viewBox="0 0 ${W} 18" preserveAspectRatio="none">${segs.map(s=>{
+    const x=(s.from-start)/(end-start)*W, w=Math.max(2,(s.to-s.from)/(end-start)*W);
+    return `<rect x="${x.toFixed(1)}" y="0" width="${w.toFixed(1)}" height="18" rx="${s.c==='good'?0:1}" fill="${col[s.c]}" data-tip="${hm(s.from)}〜${hm(s.to)}（${dur(s.to-s.from)}）"/>`;
+  }).join('')}</svg>`;
+}
+async function refreshTimeline(){
+  const STEP=60, end=Math.floor(Date.now()/1000/STEP)*STEP, start=end-86400;
+  const rows=[
+    {name:'ルーター',expr:'max(vrrpOperState{instance="192.168.99.253"})',c:v=>v===3?'warn':'good',ev:'ルーターが #2 に切り替わり、#1 に戻った',ok:v=>v!==3},
+    {name:'インターネット',expr:'max(probe_success{job="wan"})',c:v=>v===1?'good':'crit',ev:'インターネットに出られなかった',ok:v=>v===1},
+    ...NODES.map(n=>({name:n.name,expr:`up{instance="${n.inst}"}`,c:v=>v===1?'good':'crit',ev:`${n.name} が止まっていた`,ok:v=>v===1})),
+    {name:'マイクラ',expr:`probe_success{job="tcp",instance="${SERVICES[0].inst}"}`,c:v=>v===1?'good':'crit',ev:'マイクラに入れなかった',ok:v=>v===1},
+  ];
+  const data=await Promise.all(rows.map(r=>qr(r.expr,start,end,STEP)));
+  const events=[];
+  $('tlRows').innerHTML=rows.map((r,i)=>{
+    const vals=data[i].length?data[i][0].values:[]; const segs=segments(vals,start,end,STEP,r.c);
+    segs.forEach((s,k)=>{ if((s.c==='warn'||s.c==='crit')&&k>0) events.push({t:s.from,text:r.ev,len:s.to-s.from,back:k<segs.length-1,c:s.c}); });
+    const okN=vals.filter(([,v])=>r.ok(Number(v))).length, pct=vals.length?okN/vals.length*100:null;
+    return `<div class="row"><span class="name">${r.name}</span>${tlBar(segs,start,end)}<span class="pct">${pct==null?'—':pct.toFixed(2)+'%'}</span></div>`;
+  }).join('');
+  $('tlAxis').innerHTML=[0,6,12,18,24].map(h=>`<span>${hm(start+h*3600)}</span>`).join('');
+  events.sort((a,b)=>b.t-a.t);
+  $('events').innerHTML = events.length ? events.slice(0,8).map(e=>
+    `<li><time>${hm(e.t)}</time><span><span class="dot ${e.c}" style="margin-right:6px"></span>${e.text}<br>${e.back?`<span class="big">約${dur(e.len)}</span> で元に戻った`:'<span style="color:#ff7b7b">まだ戻っていない</span>'}</span></li>`).join('')
+    : '<li class="empty">この24時間、切り替わりや停止はありません</li>';
+}
+document.addEventListener('mousemove',ev=>{ const t=ev.target.closest&&ev.target.closest('[data-tip]'); if(t) showTip(ev,esc(t.dataset.tip)); else if(!(ev.target.matches&&ev.target.matches('rect[fill="transparent"]'))) hideTip(); });
+
+// ---------------- 障害試験 ----------------
+let TESTS=null;
+const toEpoch = s => s? Math.floor(new Date(s).getTime()/1000) : null;
+function goalText(g={}){ const x=[];
+  if(g.downtime_sec===0) x.push('止まらない'); else if(g.downtime_sec!=null) x.push(`停止 ≦ ${dur(g.downtime_sec)}`);
+  if(g.detect_sec!=null) x.push(`検知 ≦ ${dur(g.detect_sec)}`); if(g.recover_sec!=null) x.push(`復旧 ≦ ${dur(g.recover_sec)}`);
+  return x.length? x.join('<br>') : '—'; }
+function judge(t){
+  if(t.status!=='done') return t.status;
+  const r=t.result||{}, g=t.target||{}; let ok=true;
+  for(const k of ['downtime_sec','detect_sec','recover_sec']) if(g[k]!=null && r[k]!=null && r[k]>g[k]) ok=false;
+  return ok?'pass':'fail';
+}
+const BADGE = {pass:'<span class="badge pass">✓ 合格</span>',fail:'<span class="badge fail">✕ 目標未達</span>',todo:'<span class="badge todo">未実施</span>',plan:'<span class="badge plan">計画中</span>'};
+const cell = (v,done) => done && v!=null ? `<span class="num">${dur(v)}</span>` : `<span class="na">${done?'—':'未計測'}</span>`;
+
+function renderTests(){
+  if(!TESTS) return;
+  const T=TESTS.tests, done=T.filter(t=>t.status==='done');
+  $('kTest').innerHTML = `${done.length}<small> / ${T.length}</small>`;
+  $('kTestSub').textContent = done.length ? `合格 ${done.filter(t=>judge(t)==='pass').length}件` : '試験はこれから';
+  $('tUpdated').textContent = TESTS.updated?`更新 ${TESTS.updated}`:'';
+  const fails = done.filter(t=>t.kind!=='基準');
+  const nums = k => fails.map(t=>t.result?.[k]).filter(v=>v!=null);
+  const tk = (k,v,s) => `<div class="panel kpi"><div class="k">${k}</div><div class="v num">${v}</div><div class="s">${s}</div></div>`;
+  const dt=nums('downtime_sec'), de=nums('detect_sec');
+  $('tkpi').innerHTML =
+    tk('実施した試験', `${done.length}<small> / ${T.length}件</small>`, done.length?`合格 ${done.filter(t=>judge(t)==='pass').length}件`:'まだ実施していません') +
+    tk('いちばん短い停止', dt.length?dur(Math.min(...dt)):'—', dt.length?fails.find(t=>t.result.downtime_sec===Math.min(...dt)).name:'実施後に表示') +
+    tk('いちばん長い停止', dt.length?dur(Math.max(...dt)):'—', dt.length?fails.find(t=>t.result.downtime_sec===Math.max(...dt)).name:'実施後に表示') +
+    tk('検知時間の平均', de.length?dur(de.reduce((a,b)=>a+b,0)/de.length):'—', de.length?`${de.length}件の平均（T0 → 通知）`:'実施後に表示');
+
+  $('matrix').innerHTML = `<tr><th>シナリオ</th><th class="n">停止時間</th><th class="n">検知時間</th><th class="n">復旧まで</th><th class="n">目標</th><th>判定</th></tr>` +
+    T.map(t=>{ const d=t.status==='done', r=t.result||{};
+      return `<tr><td><a href="#t-${t.id}" style="color:inherit;text-decoration:none">${esc(t.name)}</a><div class="muted" style="font-size:11.5px">${esc(r.recovered_by||'')}</div></td>
+        <td class="n">${cell(r.downtime_sec,d)}</td><td class="n">${cell(r.detect_sec,d)}</td><td class="n">${cell(r.recover_sec,d)}</td>
+        <td class="n">${goalText(t.target)}</td><td>${BADGE[judge(t)]}</td></tr>`; }).join('');
+
+  compareChart();
+
+  $('testList').innerHTML = T.map(t=>{
+    const d=t.status==='done', r=t.result||{}, g=t.target||{};
+    const box=(label,v,goal)=>`<div><span>${label}</span><b>${d&&v!=null?dur(v).replace(/(秒|分|時間)/g,'<small>$1</small>'):`<span class="na">${d?'—':'未計測'}</span>`}</b>${goal!=null?`<em>目標 ≦ ${dur(goal)}</em>`:''}</div>`;
+    const extra=(r.extra||[]).map(x=>`<div><span>${esc(x.label)}</span><b style="font-size:16px">${esc(x.value)}</b></div>`).join('');
+    return `<details class="test" id="t-${t.id}"${d?' open':''}><summary><span class="chev">▶</span><span class="kind">${esc(t.kind)}</span><b>${esc(t.name)}</b>
+      <span class="r">${d?`<span>停止 <b class="num" style="color:var(--ink)">${dur(r.downtime_sec)}</b></span><span>検知 <b class="num" style="color:var(--ink)">${dur(r.detect_sec)}</b></span><span class="muted">${esc(r.date||'')}</span>`:''}${BADGE[judge(t)]}</span></summary>
+      <div class="tbody">
+        <div>
+          <h4>目的</h4><p>${esc(t.purpose)}</p>
+          <h4>試験方法</h4><ol>${(t.method||[]).map(m=>`<li>${esc(m)}</li>`).join('')}</ol>
+          <h4>計測方法</h4><p>${esc(t.measure)}</p>
+          ${t.notes?`<h4>気づいたこと・考察</h4><p>${esc(t.notes)}</p>`:''}
+        </div>
+        <div>
+          <h4>結果の数値</h4>
+          <div class="kv">${box('停止時間',r.downtime_sec,g.downtime_sec)}${box('検知時間（T0→通知）',r.detect_sec,g.detect_sec)}${box('復旧まで（T0→戻る）',r.recover_sec,g.recover_sec)}${extra}</div>
+          ${d&&r.recovered_by?`<h4>どう戻ったか</h4><p>${esc(r.recovered_by)}</p>`:''}
+          ${d&&r.down_from_sec!=null?`<h4>経過（T0 からの秒数）</h4><div class="chart" id="seq-${t.id}"></div>`:''}
+          ${d&&t.evidence?.from&&t.evidence.charts?.length?`<h4>証拠グラフ（Prometheus の実データ）</h4>${t.evidence.charts.map((c,i)=>`<div class="muted" style="font-size:12px;margin-top:6px">${esc(c.name)}</div><div class="chart" id="ev-${t.id}-${i}"></div>`).join('')}`:''}
+          ${!d?`<p class="muted" style="margin-top:12px;font-size:12.5px">${t.status==='plan'?'設備が揃ってから実施します。':'実施後、failtest.sh の出力を tests.json に貼るとここに数値とグラフが出ます。'}</p>`:''}
+        </div>
+      </div></details>`;
+  }).join('');
+  T.filter(t=>t.status==='done').forEach(t=>{ seqChart(t); evidence(t); });
+
+  $('ops').innerHTML = `<tr><th>項目</th><th class="n">かかった時間</th><th>測り方</th><th>測った日</th></tr>` +
+    (TESTS.ops||[]).map(o=>`<tr><td>${esc(o.name)}</td><td class="n">${o.value_sec!=null?`<span class="num">${dur(o.value_sec)}</span>`:'<span class="na">未計測</span>'}</td><td class="muted" style="font-size:12.5px">${esc(o.method)}</td><td class="muted num" style="font-size:12px">${esc(o.date||'—')}</td></tr>`).join('');
+}
+
+// 試験ごとの経過（T0 → 止まり始め → 戻る、検知）
+function seqChart(t){
+  const el=$('seq-'+t.id); if(!el) return; const r=t.result;
+  const end = Math.max(r.recover_sec||0, r.detect_sec||0, 1)*1.12;
+  const W=Math.max(300,el.clientWidth||520), H=70, L=8, R=8, x=s=>L+s/end*(W-L-R);
+  let s=`<svg viewBox="0 0 ${W} ${H}" height="${H}"><line x1="${L}" x2="${W-R}" y1="30" y2="30" stroke="var(--axis)" stroke-width="6" stroke-linecap="round"/>`;
+  if(r.down_from_sec!=null&&r.recover_sec!=null) s+=`<rect x="${x(r.down_from_sec)}" y="24" width="${Math.max(3,x(r.recover_sec)-x(r.down_from_sec))}" height="12" rx="3" fill="var(--s2)" data-tip="止まっていた ${dur(r.downtime_sec)}"/>`;
+  const row=(items,up)=>{ let out='', edge=-1e9;
+    items.filter(m=>m[0]!=null).sort((a,b)=>a[0]-b[0]).forEach(([sec,label,col])=>{
+      const xx=x(sec), w=label.length*11+46; let lx=Math.max(xx-w/2, L, edge+10); lx=Math.min(lx, W-R-w); if(lx<edge+10) lx=edge+10; edge=lx+w;
+      out+=`<line x1="${xx}" x2="${xx}" y1="${up?14:24}" y2="${up?36:46}" stroke="${col}" stroke-width="2"/><text x="${lx}" y="${up?10:60}" font-size="11" fill="var(--ink2)">${label} <tspan font-family="var(--mono)" fill="var(--ink)">${(+sec).toFixed(1)}s</tspan></text>`; });
+    return out; };
+  s+=row([[0,'T0 障害','var(--ink)'],[r.recover_sec,'戻った','var(--good)']],true)+row([[r.down_from_sec,'止まり始め','var(--s2)'],[r.detect_sec,'通知','var(--s1)']],false);
+  el.innerHTML=s+'</svg>';
+}
+async function evidence(t){
+  const e=t.evidence; if(!e||!e.from||!e.charts?.length) return;
+  const start=toEpoch(e.from), end=toEpoch(e.to), t0=toEpoch(e.t0), r=t.result;
+  const step=Math.max(5,Math.round((end-start)/300));
+  const marks=[{t:t0,label:'T0',color:'var(--ink2)'}];
+  if(r.detect_sec!=null) marks.push({t:t0+r.detect_sec,label:'通知',color:'var(--s1)'});
+  if(r.recover_sec!=null) marks.push({t:t0+r.recover_sec,label:'戻った',color:'var(--good)'});
+  for(const [i,c] of e.charts.entries()){
+    const el=$(`ev-${t.id}-${i}`); if(!el) continue;
+    try{ const res=await qr(c.expr,start,end,step);
+      if(!res.length){ el.innerHTML='<p class="muted" style="font-size:12px">Prometheus にデータが残っていません（保存期間を過ぎた可能性）</p>'; continue; }
+      lineChart(el,[{name:c.name,color:'var(--s1)',pts:ptsOf(res)}],{start,end,step,h:130,marks,sec:true,xfmt:t=>new Date(t*1000).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit',second:'2-digit'})});
+    }catch(err){ el.innerHTML=`<p class="err">${esc(err.message)}</p>`; }
+  }
+}
+function compareChart(){
+  const el=$('cCompare'); const T=(TESTS?.tests||[]).filter(t=>t.status==='done'&&t.kind!=='基準'&&(t.result?.downtime_sec!=null||t.result?.detect_sec!=null));
+  if(!T.length){ el.innerHTML='<p class="muted" style="font-size:13px;margin:30px 0;text-align:center">試験を実施すると、シナリオごとの棒グラフがここに出ます</p>'; return; }
+  const W=Math.max(300,el.clientWidth||480), rowH=46, H=T.length*rowH+24, L=130, R=56, pw=W-L-R;
+  const mx=niceMax(Math.max(...T.flatMap(t=>[t.result.downtime_sec||0,t.result.detect_sec||0]))), x=v=>v/mx*pw;
+  let s=`<svg viewBox="0 0 ${W} ${H}" height="${H}">`;
+  for(let i=0;i<=4;i++){ const xx=L+pw*i/4; s+=`<line x1="${xx}" x2="${xx}" y1="0" y2="${H-20}" stroke="var(--grid)"/><text class="ax" x="${xx}" y="${H-5}" text-anchor="middle">${fmtN(mx*i/4)}</text>`; }
+  T.forEach((t,i)=>{ const y=i*rowH+6, r=t.result;
+    s+=`<text x="${L-10}" y="${y+18}" text-anchor="end" font-size="12" fill="var(--ink2)">${esc(t.short||t.kind)}</text>`;
+    [['downtime_sec','var(--s2)','停止'],['detect_sec','var(--s1)','検知']].forEach(([k,c,lbl],j)=>{ const v=r[k]; if(v==null) return; const yy=y+j*17;
+      s+=`<rect x="${L}" y="${yy}" width="${Math.max(2,x(v))}" height="14" rx="3" fill="${c}" data-tip="${esc(t.name)}：${lbl} ${dur(v)}"/><text class="ax" x="${L+x(v)+6}" y="${yy+11}" style="fill:var(--ink)">${dur(v)}</text>`; });
+  });
+  el.innerHTML=s+'</svg>';
+}
+async function loadTests(){
+  try{ const r=await fetch('tests.json',{cache:'no-store'}); if(!r.ok) throw new Error(r.status); TESTS=await r.json(); renderTests(); }
+  catch(e){ $('testList').innerHTML=`<p class="err">tests.json を読めませんでした（${esc(e.message)}）</p>`; }
+}
+
+// ---------------- 画面切り替え・更新 ----------------
+function route(){
+  const v = location.hash==='#tests'?'tests':'now';
+  $('view-now').hidden = v!=='now'; $('view-tests').hidden = v!=='tests';
+  $('tab-now').className = v==='now'?'on':''; $('tab-tests').className = v==='tests'?'on':'';
+  if(v==='tests') renderTests(); else refreshCharts().catch(()=>{});
+}
+addEventListener('hashchange',route);
+$('range').onclick = ev => { const b=ev.target.closest('button'); if(!b) return;
+  RANGE=+b.dataset.r; [...$('range').children].forEach(x=>x.classList.toggle('on',x===b)); refreshCharts().catch(err); };
+let rz; addEventListener('resize',()=>{ clearTimeout(rz); rz=setTimeout(()=>{ refreshCharts().catch(()=>{}); renderTests(); },250); });
+
+function err(e){ $('err').textContent='Prometheus から読めませんでした：'+(e.message||e); }
+async function tick(){ try{ await refreshNow(); $('err').textContent=''; $('upd').textContent='最終更新 '+hms(Date.now()/1000); }catch(e){ err(e); } }
+async function slow(){ try{ await Promise.all([refreshTimeline(), refreshSparks(), location.hash!=='#tests'?refreshCharts():null]); }catch(e){ err(e); } }
+setInterval(()=>{ $('clock').textContent=new Date().toLocaleTimeString('ja-JP'); },1000);
+route(); tick(); slow(); loadTests();
+setInterval(tick,15000); setInterval(slow,60000); setInterval(loadTests,300000);
+</script>
+</body>
+</html>

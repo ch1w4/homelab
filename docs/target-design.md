@@ -1,6 +1,6 @@
 # 目標の構成（完成形）
 
-> 最終更新: 2026-11-13
+> 最終更新: 2026-11-17
 > このファイルは **これから作る完成形** です。今動いている構成は [README](../README.md) を見てください。
 > 「状態」の列で、完了・構築中・予定を分けています。
 
@@ -9,10 +9,10 @@
 | 項目 | 今 | 完成形 | 状態 |
 |---|---|---|---|
 | ルーター | IX2215 ＋ RTX1200（VLAN50・家族用 LAN だけ VRRP） | IX2215 ×2台で **全 VLAN を VRRP** | 完了（11/13） |
-| 回線だけ切れたとき | 切り替わらない | watch-group で外への ping を見て #2 に切替 | 予定 |
+| 回線だけ切れたとき | 切り替わらない | watch-group で外への ping を見て #2 に切替 | 完了（11/17 試験：13.3 秒） |
 | 無線 | Aterm の Wi-Fi（1階）だけ | WAPM-1166D（2階）、SSID ごとに VLAN | 完了（11/13） |
 | ゲスト | なし | VLAN60（インターネットだけ） | 完了（11/13） |
-| 監視 | Uptime Kuma | Prometheus・Alertmanager・Grafana ＋ 外からの相互監視 | 予定 |
+| 監視 | Uptime Kuma | Prometheus・Alertmanager・Grafana ＋ 外からの相互監視 | 完了（11/13〜16） |
 | ログ | rsyslog | ＋ Loki（Grafana で検索）、Oxidized（設定の履歴） | 予定 |
 | ノード間 | 1GbE（スイッチ経由） | **10GbE を3台で直結（フルメッシュ）** | 完了（11/13） |
 | HA のディスク | ZFS レプリケーション（最大15分戻る） | **Ceph**（戻らない・ライブマイグレーションが数秒） | 完了（11/13） |
@@ -39,7 +39,7 @@
 
 - 仮想 IP は今のゲートウェイのまま（各 VLAN の `.1`、家族用は `192.168.0.254`）。端末の設定は変えない。
 - 実 IP は #1 = `.252`、#2 = `.253`（家族用は `.2` / `.3`）。VRID は VLAN 番号と同じ（家族用は 1）。
-- PPPoE は 2 台とも常時接続（コミュファは同じ ID で 2 セッションまで張れた）。preempt は 2 台とも切る（#1 が急に止まると古いセッションが残り、復帰直後の #1 は外に出られないため）。
+- PPPoE は 2 台とも常時接続（コミュファは同じ ID で 2 セッションまで張れた）。preempt は当初 2 台とも切っていた（#1 が急に止まると古いセッションが残り、復帰直後の #1 は外に出られないため）。11/16 の電源断試験では復帰した #1 の PPPoE はすぐつながり、手動の切り戻しも無停止だったので、#1 だけ preempt を on に変更。#1 の回線がつながらない間は watch-group が担当に戻さない。
 - DHCP は範囲を前半（#1）・後半（#2）に分けて、2 台とも配る。
 - IX2215 は LACP 非対応なので、スイッチとは静的 LAG。
 
@@ -78,18 +78,20 @@
 ## 監視
 
 ```
-自宅が丸ごと止まる → relay01 の Uptime Kuma が気づく → Discord
-relay01 が止まる   → 自宅の Uptime Kuma が気づく    → Discord
+自宅が丸ごと止まる → mon-ext01（Oracle）の Uptime Kuma が気づく → Discord
+mon-ext01 が止まる → 自宅の Uptime Kuma（Push 監視）が気づく  → Discord
 ```
 
 | 場所 | 入れるもの |
 |---|---|
 | mon01 | Prometheus（30日）・Alertmanager（Discord）・Grafana・pve-exporter・snmp_exporter（IX 2台・スイッチ・AP）・blackbox（WAN・IX の実 IP・サービスのポート）・Loki・Oxidized |
 | log01 | rsyslog ＋ Alloy（Loki へ送る） |
-| relay01 | Uptime Kuma（Tailscale の中からだけ見られる） |
+| mon-ext01 | Uptime Kuma（Oracle Always Free の監視専用 VM、Tailscale の中からだけ見られる）。relay01 には相乗りしない |
 | 各ノード | node_exporter |
 
-アラート：WanDown・RouterDown・NodeDown・ServiceDown・CephNotHealthy（重要）、DiskLow・MemoryHigh・CpuHigh・TempHigh（警告）。
+アラート（稼働中）：WanDown・RouterDown・NodeDown・ServiceDown・VrrpFailover・VrrpSplitBrain（重要）、DiskLow・MemoryHigh・CpuHigh・TempHigh（警告）。CephNotHealthy は予定。
+
+状態：Prometheus・Alertmanager・Grafana・pve-exporter・snmp_exporter（IX 2台の VRRP）・blackbox・相互監視は完了。Loki・Oxidized は予定。
 
 ## 停電対策
 
@@ -100,15 +102,14 @@ relay01 が止まる   → 自宅の Uptime Kuma が気づく    → Discord
 
 ## 作業の順番
 
-完了：10GbE フルメッシュと Ceph、IX2215 #2 と全 VLAN の VRRP、無線 AP・VLAN60（いずれも 2026-11-13）。
+完了：10GbE フルメッシュと Ceph、IX2215 #2 と全 VLAN の VRRP、無線 AP・VLAN60（いずれも 2026-11-13）、監視基盤と相互監視（11/13〜16）、watch-group（11/17）、障害試験 6 件（11/16〜17）。
 
 これから：
 
-1. 監視基盤（Prometheus など）と相互監視
-2. watch-group（回線だけ切れたときの切替）
-3. Loki・Oxidized
-4. UPS と NUT
-5. ③のメモリ交換
+1. ノード障害の試験（マイクラに人がいない時間に）
+2. Loki・Oxidized
+3. UPS と NUT、停電の試験
+4. ③のメモリ交換
 
 ## 保留
 

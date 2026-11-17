@@ -4,7 +4,9 @@
 Proxmox VE 9 の3ノードクラスタを中心に、ゲームサーバー（Minecraft）・Webアプリ・基盤サービス（VPN・監視・バックアップ・Git）を動かしています。
 ネットワークは NEC IX2215 と Allied Telesis AT-x210 で VLAN を分け、外部公開は Cloudflare Tunnel と Oracle Cloud の中継サーバー経由にして、自宅のグローバル IP を公開していません。
 
-> 最終更新: 2026-11-13 夜（現在稼働中の構成。計画中のものは「今後の予定」に分けて記載）
+> 最終更新: 2026-11-17（現在稼働中の構成。計画中のものは「今後の予定」に分けて記載）
+>
+> **実際に機器を止めて測った障害試験の結果**は [docs/failover-tests.md](docs/failover-tests.md) にまとめています（8件中6件実施・全て合格）。
 
 ---
 
@@ -80,8 +82,16 @@ Proxmox VE 9 の3ノードクラスタを中心に、ゲームサーバー（Min
 
 ### 冗長化（2026-11-13 構築）
 
-- **ゲートウェイ**：IX2215 2台で全 VLAN と家族用 LAN を VRRP（仮想 IP は各 VLAN の `.1`、実 IP は #1 `.252`／#2 `.253`）。#1 が優先度 200 で Master、preempt は両方なし。
-- **PPPoE**：コミュファは同じ ID で 2 セッションまで張れるので、2台とも常時接続。#1 の電源断テストで、切り替えは約 3 秒。
+- **ゲートウェイ**：IX2215 2台で全 VLAN と家族用 LAN を VRRP（仮想 IP は各 VLAN の `.1`、実 IP は #1 `.252`／#2 `.253`）。#1 が優先度 200 で Master。
+- **preempt**：#1 だけ on（#1 が直ったら自動で取り返す）、#2 は off。手動の切り戻しが無停止だったことを試験で確かめてから変更（2026-11-16）。
+- **回線だけ切れたとき**：#1 の watch-group が自分の PPPoE から 1.1.1.1 に届くかを見張り、届かなくなったら 7つの VRRP を止めて #2 に渡す（2026-11-17 試験済み）。
+- **PPPoE**：コミュファは同じ ID で 2 セッションまで張れるので、2台とも常時接続。
+
+| 試験（2026-11-16〜17） | 利用者が止まった時間 | 管理者への通知 |
+|---|---:|---:|
+| #1 の電源を抜く | **3.0 秒** | 1分35秒 |
+| #1 の回線だけ切る | **13.3 秒** | 1分23秒 |
+| #1 に戻す（切り戻し） | **0 秒**（途切れなし） | — |
 - **DHCP**：範囲を前半（#1）・後半（#2）に分けて、2台とも配る。
 - **LAG**：IX は LACP 非対応なので静的 LAG ×4 を2組（スイッチ側は edgeport にして、つないだ直後に STP で止まらないようにした）。
 
@@ -108,7 +118,7 @@ Proxmox VE 9 の3ノードクラスタを中心に、ゲームサーバー（Min
 | 2015 | vpn01 | LXC | ③ | Tailscale サブネットルーター＋exit node | ◯ |
 | 2020 | pbs01 | VM | ③ | Proxmox Backup Server（HDD 3TB） | — |
 | 2025 | log01 | LXC | ③ | rsyslog（ルーター・スイッチのログを 90 日保存） | — |
-| 2030 | mon01 | LXC | ③ | Uptime Kuma（死活監視 → Discord 通知） | ◯ |
+| 2030 | mon01 | LXC | ③ | Prometheus・Grafana・Alertmanager・Uptime Kuma・自作の状態画面 | ◯ |
 | 2035 | vault01 | LXC | ③ | Vaultwarden（Tailscale 経由のみ） | ◯ |
 | 2055 | runner01 | VM | ② | Forgejo Runner（push で自動デプロイ） | — |
 
@@ -129,7 +139,10 @@ relay01 は Tailscale の ACL で **mc01 のゲームポート（TCP 25565 / UDP
 ## バックアップと運用
 
 - **バックアップ**：毎日 3:00 に全 VM/LXC を pbs01 へ（暗号化・検証あり）。mc01 は 4:30（直前にワールドを保存）。pbs01 自身は毎月②の HDD へ。
-- **監視**：Uptime Kuma で Web・Minecraft・DB・Proxmox・ルーターを監視し、Discord に通知。
+- **監視**：mon01 の Prometheus（node_exporter・pve-exporter・blackbox・snmp_exporter）で 3 ノード・サービスのポート・WAN・IX 2台の VRRP 状態を集め、Alertmanager から Discord に通知（10 種類のアラート、復旧の通知あり）。Uptime Kuma は利用者と同じ URL を外側から確認する。詳しくは [monitoring/](monitoring/)。
+- **外からの相互監視**：Oracle Cloud の監視専用 VM **mon-ext01**（Uptime Kuma）が自宅を見張り、自宅の Kuma は mon-ext01 からの Push を見張る。自宅が丸ごと止まっても、mon01 が止まっても気づける（mon01 停止の試験で 2分18秒で通知）。
+- **状態画面**：Grafana の日本語ダッシュボードと、Prometheus を読む自作の日本語ページ（いまの状態・24時間の記録・障害試験の結果）。家の中と Tailscale からだけ見られる。
+- **運用の数値**：毎晩のバックアップ 16 台で約 2分20秒、git01 をバックアップから戻して起動まで約 1分36秒、サイトのデプロイ約 5 秒（[docs/failover-tests.md](docs/failover-tests.md#運用の数値)）。
 - **ログ**：IX2215・スイッチの syslog を log01 に集約（90 日）。
 - **デプロイ**：Forgejo に push すると Forgejo Runner が docker01 に自動反映。
 - **障害対応の記録**：③の NIC（Intel I219-V / e1000e）がハングしてフェンシング → HA 対象は自動復旧。NIC のオフロード無効化で再発を防止。
@@ -150,8 +163,11 @@ relay01 は Tailscale の ACL で **mc01 のゲームポート（TCP 25565 / UDP
 
 - [x] IX2215 を2台にして全 VLAN を VRRP 化（RTX1200 を置き換え）（2026-11）
 - [x] 無線 AP（SSID ごとに VLAN）とゲスト用 VLAN60（2026-11）
-- [ ] 回線だけ切れたときの切替（watch-group）
-- [ ] Prometheus・Grafana・Alertmanager による監視基盤、Loki・Oxidized
+- [x] 回線だけ切れたときの切替（watch-group）（2026-11）
+- [x] Prometheus・Grafana・Alertmanager による監視基盤と、Oracle Cloud からの相互監視（2026-11）
+- [x] 実機を止める障害試験と、結果を表示する状態画面（2026-11、6/8 件実施）
+- [ ] ノード障害の試験（マイクラに人がいない時間に）
+- [ ] Loki（ログ検索）・Oxidized（設定の履歴）
 - [x] 3ノードを 10GbE で直結（フルメッシュ）し、Ceph で HA 対象を共有ストレージ化（2026-11）
 - [ ] ③のメモリを 32GB に増設
 - [ ] UPS と NUT による停電時の自動シャットダウン
@@ -170,3 +186,7 @@ relay01 は Tailscale の ACL で **mc01 のゲームポート（TCP 25565 / UDP
 - Cloudflare Tunnel と Oracle Cloud＋Tailscale を使った「ポートを開けない」外部公開
 - HAProxy の PROXY protocol と、それを受ける側（Velocity・Geyser）の設定の整合
 - NIC 障害からの HA の自動復旧と、原因（e1000e のハング）の切り分け
+- 障害試験で監視の穴を見つけた：「#1 が Master ではない」を #1 自身に SNMP で聞く作りだったため、#1 の電源が切れている間は判定できず、通知が 5 分遅れた。「#2 が Master になった」で判定するよう直した（電源断での効果は次の試験で確認）
+- ルーター本体は動いたまま回線だけ切れると、VRRP だけでは切り替わらない。watch-group で自分の回線を見張って担当を降りる必要がある（電源断 3.0 秒に対して回線断は 13.3 秒。判断に時間がかかる分だけ長い）
+- 数秒で自動復旧する停止は、30 秒ごとの Prometheus や 60 秒ごとの Uptime Kuma には跡が残らない。0.5 秒ごとに確認する計測スクリプトでないと測れない
+- 監視を 2 段（URL を見る Uptime Kuma／ポートを見る Prometheus）にしておくと、片方の通知条件が長くてももう片方が先に気づく（サービス停止の試験で Kuma が 45 秒で通知）

@@ -1,0 +1,461 @@
+{
+  "updated": "2026-11-17",
+  "note": "status は done（実施済み）/ todo（これから）/ plan（設備が揃ってから）。数字は failtest.sh の出力を貼る。目標(target)は自分で決めた合格ライン。",
+  "tests": [
+    {
+      "id": "normal",
+      "name": "正常時（基準）",
+      "kind": "基準",
+      "status": "done",
+      "purpose": "障害がないときの応答と損失を測り、ほかの試験と比べる物差しにする",
+      "method": [
+        "何も操作しない状態で、mon01 から 1.1.1.1 へ 0.5 秒ごとに 10 分間 ping を打つ",
+        "コマンド：./failtest.sh baseline ping:1.1.1.1 600"
+      ],
+      "measure": "failtest.sh（0.5秒ごとの ping）",
+      "target": {
+        "downtime_sec": 0
+      },
+      "result": {
+        "date": "2026-11-16 13:51",
+        "detect_sec": null,
+        "down_from_sec": null,
+        "downtime_sec": 0,
+        "recover_sec": null,
+        "lost": 0,
+        "recovered_by": "",
+        "extra": [
+          {
+            "label": "確認した回数",
+            "value": "1169回"
+          },
+          {
+            "label": "失敗",
+            "value": "0回（0.00%）"
+          },
+          {
+            "label": "平均の応答",
+            "value": "6.6ms"
+          },
+          {
+            "label": "最大の応答",
+            "value": "9.05ms"
+          }
+        ]
+      },
+      "evidence": {
+        "t0": "2026-11-16T04:51:54+00:00",
+        "from": "2026-11-16T04:51:54+00:00",
+        "to": "2026-11-16T05:01:55+00:00",
+        "charts": [
+          {
+            "name": "外までの応答（ms）",
+            "expr": "avg(probe_duration_seconds{job=\"wan\"})*1000"
+          }
+        ]
+      },
+      "notes": "10分間・1169回の確認で失敗0回。平均6.6ms・最大9.05ms。これをほかの試験と比べる基準にする"
+    },
+    {
+      "id": "router",
+      "name": "ルーター障害（#1 の電源を抜く）",
+      "kind": "ルーター",
+      "status": "done",
+      "purpose": "メインのルーターが壊れても、予備の #2 が自動で引き継いでインターネットが使えるか",
+      "method": [
+        "前提：#1 が担当（Master）、#2 が待機（Backup）。この画面で「#1 が担当」になっていること",
+        "mon01 で ./failtest.sh ping:1.1.1.1 VrrpFailover を起動する",
+        "Enter を押した直後に IX #1 の電源ケーブルを抜く（T0）",
+        "ping が戻り、Discord に通知が来るまで待つ（スクリプトが自動で終わる）",
+        "#1 の電源を戻し、#1 が担当に戻る（切り戻し）までの時間も記録する"
+      ],
+      "measure": "failtest.sh（ping 0.5秒ごと）、Prometheus に残ったアラートの発生時刻（ALERTS）",
+      "target": {
+        "downtime_sec": 10,
+        "detect_sec": 120
+      },
+      "result": {
+        "date": "2026-11-16 20:51",
+        "detect_sec": 95.4,
+        "down_from_sec": 4.7,
+        "downtime_sec": 3.0,
+        "recover_sec": 7.7,
+        "lost": 2,
+        "recovered_by": "VRRP で #2 が自動で担当になった（人の操作なし）",
+        "extra": [
+          {
+            "label": "最初の通知",
+            "value": "RouterDown（#1 が応答しない・1分続いたら）"
+          },
+          {
+            "label": "VrrpFailover の通知",
+            "value": "T0 + 約5分13秒（#1 が起動してから）"
+          },
+          {
+            "label": "切り戻し",
+            "value": "途切れ0回（以後は自動に変更）"
+          }
+        ]
+      },
+      "evidence": {
+        "t0": "2026-11-16T20:51:38+09:00",
+        "from": "2026-11-16T20:48:39+09:00",
+        "to": "2026-11-16T21:02:00+09:00",
+        "charts": [
+          {
+            "name": "#2 の担当状態（3=担当 2=待機）",
+            "expr": "max(vrrpOperState{instance=\"192.168.99.253\"})"
+          },
+          {
+            "name": "#1 が応答するか（1=応答）",
+            "expr": "probe_success{job=\"routers\",instance=\"192.168.99.252\"}"
+          },
+          {
+            "name": "インターネットに出られるか（1=出られる）",
+            "expr": "max(probe_success{job=\"wan\"})"
+          }
+        ]
+      },
+      "notes": "IX #1 の電源を抜いてから 3.0 秒（ping 失敗2回）で #2 が引き継ぎ、インターネットもマイクラも止まらずに済んだ。通知は「#1 が応答しない」（RouterDown）が T0 から約1分35秒で届いた。一方「#2 に切り替わった」（VrrpFailover）は #1 の状態を SNMP で見る作りだったため、#1 の電源が切れている間はデータがなく発報せず、#1 が起動して待機（Backup）と答えた T0+約5分13秒に初めて出た。→ #2 側の状態（#2 が Master か）で判定するようルールを修正した。電源断のときにどれだけ早くなったかは、次の電源断の試験で確かめる。試験時は preempt が2台とも off で、#1 が直っても自動では戻らなかった。手で切り戻すと途切れ0回だったため、#1 だけ preempt を on にして、直ったら自動で戻る設計に変えた",
+      "short": "ルーター"
+    },
+    {
+      "id": "wan",
+      "name": "回線障害（#1 の回線だけ切る）",
+      "kind": "回線",
+      "status": "done",
+      "purpose": "ルーターは動いているが回線だけ切れたとき、watch-group で #2 に切り替わるか",
+      "method": [
+        "前提：#1 が担当（preempt on）、#1 に watch-group WAN1（自分の PPPoE から 1.1.1.1 に届かなければ 7つの VRRP を止める）",
+        "mon01 で ./failtest.sh ping:1.1.1.1 VrrpFailover を起動",
+        "Enter（T0）の直後に IX #1 で interface GigaEthernet0.1 → shutdown（回線だけを切る。ルーター本体は動いたまま）",
+        "通知が出て計測が終わったら、もう一度 failtest.sh を起動して no shutdown。#1 が自動で担当に戻るか、途切れるかを測る"
+      ],
+      "measure": "failtest.sh（ping 0.5秒ごと＋Alertmanager を2秒ごとに確認）、IX #1 の show vrrp",
+      "target": {
+        "downtime_sec": 15,
+        "detect_sec": 120
+      },
+      "result": {
+        "date": "2026-11-17 08:57",
+        "detect_sec": 82.5,
+        "down_from_sec": 1.0,
+        "downtime_sec": 13.3,
+        "recover_sec": 14.3,
+        "lost": 24,
+        "recovered_by": "watch-group が回線断を見つけて #1 が担当をやめ、#2 が自動で引き継いだ（人の操作なし）",
+        "extra": [
+          {
+            "label": "通知",
+            "value": "VrrpFailover（T0 + 約1分23秒）"
+          },
+          {
+            "label": "回線を戻したとき",
+            "value": "#1 が自動で取り返し、途切れ0回"
+          }
+        ]
+      },
+      "evidence": {
+        "t0": "2026-11-17T08:57:29+09:00",
+        "from": "2026-11-17T08:54:29+09:00",
+        "to": "2026-11-17T09:05:49+09:00",
+        "charts": [
+          {
+            "name": "#2 の担当状態（3=担当 2=待機）",
+            "expr": "max(vrrpOperState{instance=\"192.168.99.253\"})"
+          },
+          {
+            "name": "インターネットに出られるか（1=出られる）",
+            "expr": "max(probe_success{job=\"wan\"})"
+          }
+        ]
+      },
+      "notes": "ルーター本体は動いたまま回線だけが切れた場合、VRRP 自体は「#1 は元気」と判断してしまうため、そのままでは切り替わらない。watch-group で #1 自身の回線（1.1.1.1 に届くか）を見張り、届かなくなったら #1 が担当を降りるようにしたことで、13.3 秒で #2 に切り替わった。ルーター障害（3.0 秒）より長いのは、watch-group が「回線が切れた」と判断するまでの時間がかかるため。VrrpFailover は T0 から約1分23秒で届いた（今回は #1 が動いたままなので、#1 に状態を聞けた）。回線を戻すと preempt により #1 が自動で担当に戻り、そのときの途切れは0回だった",
+      "short": "回線"
+    },
+    {
+      "id": "node",
+      "name": "ノード障害（② pve-app の電源を抜く）",
+      "kind": "サーバー",
+      "status": "todo",
+      "purpose": "サーバー1台が突然止まっても、HA で別のサーバーに移ってサービスが戻るか",
+      "method": [
+        "前提：対象のサービス（例：Forgejo 192.168.20.45:3000）が HA ＋ Ceph に入っていて ② で動いていること",
+        "計測は止めないノード上の端末で行う：./failtest.sh tcp:192.168.20.45:3000 NodeDown（AM=http://192.168.20.30:9093）",
+        "Enter の直後に ② の電源ケーブルを抜く（T0）",
+        "HA がほかのノードでサービスを起動し、ポートが開くまで待つ",
+        "② の電源を戻し、Ceph が HEALTH_OK に戻るまでの時間も記録する"
+      ],
+      "measure": "failtest.sh（TCP 0.5秒ごと）、Proxmox の HA 画面・タスクログ",
+      "target": {
+        "downtime_sec": 240,
+        "detect_sec": 120
+      },
+      "result": {
+        "date": null,
+        "detect_sec": null,
+        "down_from_sec": null,
+        "downtime_sec": null,
+        "recover_sec": null,
+        "lost": null,
+        "recovered_by": "HA がほかのノードでコンテナを起動した（データは Ceph にあるので失われない）",
+        "extra": []
+      },
+      "evidence": {
+        "t0": null,
+        "from": null,
+        "to": null,
+        "charts": [
+          {
+            "name": "② pve-app が動いているか（1=動いている）",
+            "expr": "up{instance=\"192.168.99.12:9100\"}"
+          },
+          {
+            "name": "サービスのポート（1=開いている）",
+            "expr": "probe_success{job=\"tcp\",instance=\"192.168.20.45:3000\"}"
+          }
+        ]
+      },
+      "notes": "② には proxy01（VM 3010：Nginx Proxy Manager・cloudflared）もあり、止めると Web 公開も一時的に止まる。③ を止める場合も vpn01（relay01 からマイクラへの入り口）が移るまで外からのマイクラが切れる。どちらもマイクラに人がいない時間に実施する。git01 と db01 がどちらも ② にあるため、依存関係ごと別ノードで戻るかも確認する",
+      "short": "ノード"
+    },
+    {
+      "id": "service",
+      "name": "サービス停止a（プロセスが落ちた → 自動で戻る）",
+      "kind": "サービス",
+      "status": "done",
+      "purpose": "アプリが突然落ちても、人の手なしで自動で立ち上がるか",
+      "method": [
+        "前提：Forgejo（git01、CT 2045、pve-app）は systemd で動き、Restart=always・2秒後に再起動の設定",
+        "mon01 で ./failtest.sh tcp:192.168.20.45:3000 ServiceDown を起動",
+        "Enter（T0）の直後に pve-app で pct exec 2045 -- systemctl kill -s KILL forgejo（プロセスを強制終了）",
+        "自動で戻るか、通知が出るかを3分間見る"
+      ],
+      "measure": "failtest.sh（TCP 0.5秒ごと＋Alertmanager を2秒ごとに確認）",
+      "target": {
+        "downtime_sec": 30
+      },
+      "result": {
+        "date": "2026-11-16 14:34",
+        "detect_sec": null,
+        "down_from_sec": 2.1,
+        "downtime_sec": 2.5,
+        "recover_sec": 4.6,
+        "lost": 5,
+        "recovered_by": "systemd が自動で再起動した（Restart=always）。人の操作なし",
+        "extra": [
+          {
+            "label": "通知",
+            "value": "出なかった（想定どおり）"
+          },
+          {
+            "label": "通知の条件",
+            "value": "2分続いたら"
+          }
+        ]
+      },
+      "evidence": {
+        "t0": "2026-11-16T14:34:44+09:00",
+        "from": "2026-11-16T14:31:44+09:00",
+        "to": "2026-11-16T14:40:49+09:00",
+        "charts": [
+          {
+            "name": "サービスのポート（1=開いている）",
+            "expr": "probe_success{job=\"tcp\",instance=\"192.168.20.45:3000\"}"
+          }
+        ]
+      },
+      "notes": "2.5秒で自動復旧したため、Prometheus（30秒ごとの確認）のグラフにも Uptime Kuma にも止まった跡が残らなかった。通知は「2分続いたら」の条件なので出ていない。すぐ直る落ち方では管理者を呼ばない、という狙いどおりの動き。短い停止は failtest.sh のような細かい計測でしか見えないことも分かった",
+      "short": "サービスa"
+    },
+    {
+      "id": "service_stop",
+      "name": "サービス停止b（止まったまま → 何分で気づけるか）",
+      "kind": "サービス",
+      "status": "done",
+      "purpose": "自動で戻らない止まり方をしたとき、何分で管理者に通知が届くか",
+      "method": [
+        "mon01 で ./failtest.sh tcp:192.168.20.45:3000 ServiceDown を起動",
+        "Enter（T0）の直後に pve-app で pct exec 2045 -- systemctl stop forgejo（人が止めた扱いなので自動では戻らない）",
+        "通知（Discord）が来たら pct exec 2045 -- systemctl start forgejo で戻す"
+      ],
+      "measure": "failtest.sh（TCP 0.5秒ごと＋Alertmanager）、Uptime Kuma の通知時刻（Discord）",
+      "target": {
+        "detect_sec": 180
+      },
+      "result": {
+        "date": "2026-11-16 14:39",
+        "detect_sec": 45,
+        "down_from_sec": 1.5,
+        "downtime_sec": 47.0,
+        "recover_sec": 48.5,
+        "lost": 92,
+        "recovered_by": "Uptime Kuma の通知を見て、手で起動（systemctl start forgejo）",
+        "extra": [
+          {
+            "label": "最初に気づいた監視",
+            "value": "Uptime Kuma（git.ch1w4.com が 502）"
+          },
+          {
+            "label": "Prometheus の通知",
+            "value": "出ず（2分続く前に戻したため）"
+          },
+          {
+            "label": "「戻った」通知",
+            "value": "戻ってから約50秒後（14:41:38）"
+          }
+        ]
+      },
+      "evidence": {
+        "t0": "2026-11-16T14:39:53+09:00",
+        "from": "2026-11-16T14:36:54+09:00",
+        "to": "2026-11-16T14:46:42+09:00",
+        "charts": [
+          {
+            "name": "サービスのポート（1=開いている）",
+            "expr": "probe_success{job=\"tcp\",instance=\"192.168.20.45:3000\"}"
+          }
+        ]
+      },
+      "notes": "自動で戻らない止め方（systemctl stop）では、T0 から約45秒で Uptime Kuma が「git.ch1w4.com が 502 を返す」ことに気づき Discord に通知した。利用者と同じ URL を外側から確認しているので、利用者が困るのとほぼ同時に気づける。Prometheus の ServiceDown は「2分続いたら」なので、それより前に手で戻したため出ていない。監視を2段（URL を見る Kuma／ポートを見る Prometheus）にしているので、片方が遅くてももう片方が先に気づく。「戻った」の通知は Kuma の次の確認（60秒ごと）まで遅れる",
+      "short": "サービスb"
+    },
+    {
+      "id": "monitor",
+      "name": "監視サーバー停止（mon01 を止める）",
+      "kind": "監視",
+      "status": "done",
+      "purpose": "監視そのものが止まったとき、外の監視（mon-ext01）が気づけるか",
+      "method": [
+        "pve-infra で計測スクリプトを起動：./failtest.sh tcp:192.168.20.30:8080（この画面のポート）",
+        "Enter（T0）の直後に、別の端末で ha-manager set ct:2030 --state stopped を実行して mon01 を止める",
+        "外の監視（mon-ext01 の Uptime Kuma「自宅監視」60秒ごと・再試行2回）から Discord に通知が来るまで待つ",
+        "通知を見てから ha-manager set ct:2030 --state started で戻し、ポートが開くまで計測する"
+      ],
+      "measure": "failtest.sh（TCP 0.5秒ごと）と、Uptime Kuma が記録した通知の時刻（mon01 が止まるので Alertmanager は使えない）",
+      "target": {
+        "detect_sec": 180
+      },
+      "result": {
+        "date": "2026-11-16 14:21",
+        "detect_sec": 138,
+        "down_from_sec": 4.6,
+        "downtime_sec": 166.0,
+        "recover_sec": 170.6,
+        "lost": 116,
+        "recovered_by": "外部監視の通知を見て、手で起動（ha-manager set ct:2030 --state started）",
+        "extra": [
+          {
+            "label": "外部監視の設定",
+            "value": "60秒ごと・再試行2回"
+          },
+          {
+            "label": "通知を見てから戻るまで",
+            "value": "約33秒"
+          },
+          {
+            "label": "「戻った」通知",
+            "value": "戻ってから約27秒後"
+          }
+        ]
+      },
+      "evidence": {
+        "t0": "2026-11-16T14:21:42+09:00",
+        "from": "2026-11-16T14:18:42+09:00",
+        "to": "2026-11-16T14:28:10+09:00",
+        "charts": [
+          {
+            "name": "監視の記録（mon01 が止まっている間は記録そのものが途切れる）",
+            "expr": "max(probe_success{job=\"wan\"})"
+          }
+        ]
+      },
+      "notes": "mon01 が止まると Prometheus・Alertmanager も止まるため、家の中の監視だけでは気づけない。外（Oracle Cloud の mon-ext01）から見張っているので、T0 から約2分18秒で Discord に通知が届いた。通知までの時間は「60秒ごと・再試行2回」の設定によるもので、一瞬の通信の乱れで誤報を出さないための待ち時間（最大約3分）。通知の時刻は Kuma の記録（14:24:00、分単位）から計算したため、誤差は1分以内。",
+      "short": "監視サーバー"
+    },
+    {
+      "id": "power",
+      "name": "停電（UPS で安全に止めて、復電で戻る）",
+      "kind": "停電",
+      "status": "plan",
+      "purpose": "停電でも壊さずに止まり、電気が戻ったら人の手なしで全部戻るか",
+      "method": [
+        "UPS と NUT を入れてから行う",
+        "UPS の電源プラグを抜く（T0）→ 決めた残り時間でサーバーが順に自動停止するか",
+        "プラグを戻す → BIOS の自動起動 → Ceph → HA → 各サービスが戻るまでの時間を測る"
+      ],
+      "measure": "ストップウォッチ、Proxmox のタスクログ、この画面の記録",
+      "target": {
+        "recover_sec": 900
+      },
+      "result": {
+        "date": null,
+        "detect_sec": null,
+        "down_from_sec": null,
+        "downtime_sec": null,
+        "recover_sec": null,
+        "lost": null,
+        "recovered_by": "",
+        "extra": []
+      },
+      "evidence": {
+        "t0": null,
+        "from": null,
+        "to": null,
+        "charts": []
+      },
+      "notes": "UPS 導入後に実施",
+      "short": "停電"
+    }
+  ],
+  "ops": [
+    {
+      "name": "バックアップ：毎晩3時の全体（3台のノードで同時に、16台分）",
+      "value_sec": 140,
+      "date": "2026-11-16",
+      "method": "3:00 に開始し、最後の1台が 03:02:20 に終わるまで（Proxmox のバックアップのログ（/var/log/vzdump の Finished Backup … (hh:mm:ss)））"
+    },
+    {
+      "name": "バックアップ：mc01（マイクラ、VM 3020）",
+      "value_sec": 270,
+      "date": "2026-11-16",
+      "method": "4:30 に別の時間帯で実行。Proxmox のバックアップのログ（/var/log/vzdump の Finished Backup … (hh:mm:ss)）"
+    },
+    {
+      "name": "バックアップ：mon01（監視、CT 2030）",
+      "value_sec": 66,
+      "date": "2026-11-16",
+      "method": "Proxmox のバックアップのログ（/var/log/vzdump の Finished Backup … (hh:mm:ss)）"
+    },
+    {
+      "name": "バックアップ：git01（Forgejo、CT 2045）",
+      "value_sec": 34,
+      "date": "2026-11-16",
+      "method": "Proxmox のバックアップのログ（/var/log/vzdump の Finished Backup … (hh:mm:ss)）"
+    },
+    {
+      "name": "バックアップ：データベース（CT 2040）",
+      "value_sec": 19,
+      "date": "2026-11-16",
+      "method": "Proxmox のバックアップのログ（/var/log/vzdump の Finished Backup … (hh:mm:ss)）"
+    },
+    {
+      "name": "デプロイ：サイトの更新（Forgejo Actions）",
+      "value_sec": 4.7,
+      "date": "2026-11-16",
+      "method": "push してから Actions（deploy.yml）が終わるまで。成功した直近6回（#24・#25・#29〜#32）の平均。最短4秒・最長6秒"
+    },
+    {
+      "name": "リストア：git01（CT 2045）をバックアップから戻して起動",
+      "value_sec": 96,
+      "date": "2026-11-16",
+      "method": "PBS の暗号化バックアップ（3.1GB）を別の番号（9999）で Ceph に復元 65秒 ＋ 起動して OS が使える状態まで 31秒。リポジトリのデータ（/var/lib/forgejo/data/forgejo-repositories/chiwa）が戻っていることを確認。本物とぶつからないようネットワークを外して試験したため、アプリは DB（db01・PostgreSQL）につながらず起動待ちのまま。確認後に複製は削除"
+    },
+    {
+      "name": "切り戻し（#2 → #1）",
+      "value_sec": 0,
+      "date": "2026-11-17",
+      "method": "初回（11/16）は preempt が2台とも off で手動で戻し、途切れ0回。それを受けて #1 だけ preempt を on に変更し、11/17 の回線障害の試験で自動の切り戻しも途切れ0回を確認（ping 0.5秒ごと・約4分間）"
+    }
+  ]
+}
